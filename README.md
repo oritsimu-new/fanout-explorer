@@ -3,7 +3,7 @@
 Two read-only bookmarklets that show the query fan-out behind a prompt: every web search the assistant ran, the pages each search returned and which of them were cited.
 
 - ChatGPT Fanout Explorer, for chatgpt.com. Install page: https://www.oritmutznik.com/wp-content/uploads/2026/09/chatgpt-fanout-explorer-install.html. Write-up: https://www.oritmutznik.com/ai-workflows/chatgpt-fanout-explorer-bookmarklet
-- Claude Fanout Explorer, for claude.ai. Install page: https://www.oritmutznik.com/wp-content/uploads/2026/09/claude-fanout-explorer-install.html. Write-up: https://www.oritmutznik.com/ai-workflows/chatgpt-vs-claude-fan-outs
+- Claude Fanout Explorer (write up incoming), for claude.ai. Install page: https://www.oritmutznik.com/wp-content/uploads/2026/09/claude-fanout-explorer-install.html. Write-up: coming soon
 
 ## Install from here
 
