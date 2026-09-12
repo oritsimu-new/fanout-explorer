@@ -6,7 +6,7 @@ Three free, read-only bookmarklets that show the query fan-out behind an AI answ
 - Claude Fanout Explorer, for claude.ai. Install page: https://www.oritmutznik.com/wp-content/uploads/2026/09/claude-fanout-explorer-install.html
 - Gemini Fanout Explorer, for gemini.google.com. Install page: https://www.oritmutznik.com/wp-content/uploads/2026/09/gemini-fanout-explorer-install.html
 - All three on one page: https://www.oritmutznik.com/wp-content/uploads/2026/09/fanout-explorer.html
-- Write-up: https://www.oritmutznik.com/ai-workflows/chatgpt-vs-claude-fan-outs
+- Write-up: https://www.oritmutznik.com/ai-workflows/chatgpt-vs-claude-vs-gemini-fan-outs
 
 ## What each one shows
 
