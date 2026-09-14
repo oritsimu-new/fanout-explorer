@@ -30,4 +30,4 @@ Three free, read-only bookmarklets that show the query fan-out behind an AI answ
 
 Nothing about your chats is sent anywhere: Each tool reads the conversation from the assistant's own API in your browser and keeps a copy in your browser's local storage.
 
-Built by Orit Mutznik, https://www.oritmutznik.com. Feedback: https://www.linkedin.com/in/oritsimu
+Built by Orit Mutznik, https://www.oritmutznik.com. Feedback: [LinkedIn](https://www.linkedin.com/in/oritsimu), [X](https://x.com/oritsimu)
