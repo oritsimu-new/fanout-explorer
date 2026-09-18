@@ -5,7 +5,7 @@
   //
   // Gemini exposes less than ChatGPT or Claude: it shows the sources it cited, not the wider pool it read and passed
   // over, and its search queries live only in the stored conversation, never on screen. This surfaces both.
-  const BUILD = '2026-09-18';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-18.2';   // shown in the panel so a stale install can be spotted at a glance
   const queries = [];   // { n, turn, query, prompt, reddit }
   const sources = [];   // { n, turn, url, raw, host, title, snippet, supports, prompt, reddit }
   const meta = { id: '', at: '', prompts: 0, promptList: [], model: '', queryCount: 0, sourceCount: 0, domainCount: 0, redditQueries: 0, redditSources: 0 };
@@ -153,7 +153,7 @@
   // ---------- Panel ----------
   const old = document.getElementById('gm-export'); if (old) old.remove();
   const box = document.createElement('div'); box.id = 'gm-export';
-  box.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;box-sizing:border-box;width:min(1000px,96vw);max-width:calc(100vw - 24px);max-height:88vh;overflow:auto;overscroll-behavior:contain;background:rgb(17,17,17);color:rgb(235,235,235);font:13px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;border:1px solid rgb(70,70,70);border-radius:10px;padding:14px;box-shadow:0 8px 30px rgba(0,0,0,.5);text-align:left';
+  box.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;box-sizing:border-box;width:min(1000px,96vw);max-width:calc(100vw - 24px);max-height:88vh;overflow:auto;resize:both;min-width:320px;min-height:160px;overscroll-behavior:contain;background:rgb(17,17,17);color:rgb(235,235,235);font:13px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;border:1px solid rgb(70,70,70);border-radius:10px;padding:14px;box-shadow:0 8px 30px rgba(0,0,0,.5);text-align:left';
   const bar = document.createElement('div'); bar.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:sticky;top:-14px;z-index:5;background:rgb(17,17,17);margin:-14px -14px 10px;padding:14px 14px 10px';
   const title = document.createElement('strong'); title.textContent = 'Gemini Fanout Explorer'; title.style.cssText = 'font-size:14px';
   const ver = document.createElement('span'); ver.textContent = 'v' + BUILD; ver.title = 'Build date of the code you are running. The install page always has the newest one.'; ver.style.cssText = 'font-size:11px;color:rgb(150,150,150);margin-right:auto';
@@ -175,20 +175,67 @@
   // A transform, filter or containment on an ancestor makes position:fixed resolve against that ancestor
   // instead of the viewport, which can push the panel and its Close button off screen. Measure after mount
   // and correct. vh units also misreport on some setups, so the height cap is set in pixels.
+  // The panel opens at the top right, which is out of reach on a magnified screen or a narrow window,
+  // so it can be dragged by its toolbar and resized from the bottom right corner. The last position and
+  // size are remembered in this browser. Double-click the title to put it back where it started.
+  const POS_KEY = 'fo-export:pos:v1';
+  const readPos = () => { try { return JSON.parse(localStorage.getItem(POS_KEY) || 'null'); } catch (e) { return null; } };
+  const savePos = () => { const r = box.getBoundingClientRect(); try { localStorage.setItem(POS_KEY, JSON.stringify({ left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) })); } catch (e) {} };
+  const clearPos = () => { try { localStorage.removeItem(POS_KEY); } catch (e) {} };
+
+  const layout = () => {
+    const p = readPos();
+    const w = p && p.width ? Math.min(Math.max(320, p.width), Math.max(320, innerWidth - 16)) : Math.min(1000, innerWidth - 24);
+    box.style.right = 'auto';
+    box.style.width = w + 'px';
+    if (p && p.height) { box.style.height = Math.min(Math.max(160, p.height), Math.max(160, innerHeight - 16)) + 'px'; box.style.maxHeight = 'none'; }
+    else { box.style.height = ''; box.style.maxHeight = Math.max(220, innerHeight - 24) + 'px'; }
+    const left = p ? p.left : innerWidth - w - 12;
+    const top = p ? p.top : 12;
+    box.style.left = Math.min(Math.max(0, left), Math.max(0, innerWidth - 120)) + 'px';
+    box.style.top = Math.min(Math.max(0, top), Math.max(0, innerHeight - 40)) + 'px';
+  };
+
   const fitPanel = () => {
-    box.style.maxHeight = Math.max(220, innerHeight - 24) + 'px';
+    layout();
+    // A transform, filter or containment on an ancestor makes position:fixed resolve against that
+    // ancestor instead of the viewport, which can push the panel off screen. Measure and correct.
     let r = box.getBoundingClientRect();
     const off = () => { r = box.getBoundingClientRect(); return r.top < -1 || r.left < -1 || r.right > innerWidth + 1; };
     if (off() && box.parentNode !== document.documentElement) document.documentElement.appendChild(box);
     if (off()) {
       box.style.transform = 'none';
-      box.style.right = 'auto';
-      box.style.top = (12 - (r.top - parseFloat(box.style.top || 12))) + 'px';
-      box.style.left = Math.max(12, innerWidth - box.offsetWidth - 12) + 'px';
+      box.style.top = (parseFloat(box.style.top) - r.top + 12) + 'px';
+      box.style.left = (parseFloat(box.style.left) - r.left + Math.max(12, innerWidth - box.offsetWidth - 12)) + 'px';
     }
   };
   fitPanel();
   addEventListener('resize', fitPanel);
+
+  // Drag by the toolbar, anywhere that is not a button.
+  bar.style.cursor = 'move';
+  bar.title = 'Drag to move the panel. Double-click to put it back at the top right.';
+  bar.addEventListener('pointerdown', e => {
+    if (e.target.closest('button')) return;
+    const r0 = box.getBoundingClientRect(), sx = e.clientX, sy = e.clientY;
+    const move = ev => {
+      box.style.right = 'auto';
+      box.style.left = Math.min(Math.max(0, r0.left + ev.clientX - sx), Math.max(0, innerWidth - 120)) + 'px';
+      box.style.top = Math.min(Math.max(0, r0.top + ev.clientY - sy), Math.max(0, innerHeight - 40)) + 'px';
+    };
+    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); savePos(); };
+    addEventListener('pointermove', move); addEventListener('pointerup', up);
+    e.preventDefault();
+  });
+  bar.addEventListener('dblclick', e => { if (e.target.closest('button')) return; clearPos(); box.style.height = ''; fitPanel(); });
+  // Remember a size the reader dragged out of the bottom right corner.
+  let lastSize = '';
+  box.addEventListener('pointerup', () => setTimeout(() => {
+    const s = box.offsetWidth + 'x' + box.offsetHeight;
+    if (lastSize && s !== lastSize) savePos();
+    lastSize = s;
+  }, 0));
+  lastSize = box.offsetWidth + 'x' + box.offsetHeight;
   const showTab = (which) => {
     const on = 'rgb(255,255,255)', off = 'rgb(170,170,170)';
     [[tabTable, 'table'], [tabIndex, 'index'], [tabTypes, 'types']].forEach(([b, k]) => { b.style.color = which === k ? on : off; b.style.borderBottomColor = which === k ? on : 'transparent'; });
