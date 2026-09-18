@@ -4,13 +4,17 @@
   // Read-only: it sends no prompts and changes nothing.
   const SEARCH_TYPES = ['fast', 'slow', 'image', 'product', 'news', 'video', 'finance', 'weather', 'sports', 'business'];
   const ACTION_TYPES = ['open', 'find', 'click', 'length', 'screenshot', 'scroll'];
-  const OPEN_WEB = ['fast', 'slow', 'news', 'product', 'video', 'finance', 'weather', 'sports'];
+  const OPEN_WEB = ['fast', 'slow', 'news', 'product', 'video', 'finance', 'weather', 'sports', 'web'];
+  // From September 2026 ChatGPT stopped putting the query lines in the tool message body, on both free and
+  // Plus, and renamed the recipient to 'web' on some accounts. The searches and their results still arrive,
+  // so a round with no readable query is kept and labelled rather than dropped.
+  const HIDDEN_Q = 'query not exposed by ChatGPT';
   const NO_RESULTS = ['business', 'image'];   // their results are not exposed in the payload
 
   const rows = [];
   const batches = [];   // batches[b] = { turn, pos, entries: [{url, raw, host, key, cited}] }
   const turns = [];     // turns[t] = { keys, urls, hasAnswer, batches, prompt }
-  const meta = { id: '', at: '', prompts: 0, promptList: [], fetched: 0, cited: 0, redditFetched: 0, redditCited: 0, unknownTurns: 0 };
+  const meta = { id: '', at: '', prompts: 0, promptList: [], fetched: 0, cited: 0, redditFetched: 0, redditCited: 0, unknownTurns: 0, hiddenQueries: 0 };
 
   const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, '').toLowerCase(); } catch (e) { return ''; } };
   const normUrl = u => String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[?\x23]/)[0].replace(/\/$/, '');
@@ -74,7 +78,7 @@
 
   const extract = (j) => {
     rows.length = 0; batches.length = 0; turns.length = 0;
-    meta.fetched = 0; meta.cited = 0; meta.redditFetched = 0; meta.redditCited = 0; meta.unknownTurns = 0; meta.promptList = [];
+    meta.fetched = 0; meta.cited = 0; meta.redditFetched = 0; meta.redditCited = 0; meta.unknownTurns = 0; meta.hiddenQueries = 0; meta.promptList = [];
     let prompt = '', batch = 0, turn = 0, cur = null;
     const bigToPos = {};   // long round id (from tool results and cite markers) -> position of the round inside its turn
     const addEntry = (b, e, pos) => {
@@ -96,11 +100,16 @@
       }
       if (!turns[turn]) turns[turn] = { keys: new Set(), urls: new Set(), hasAnswer: false, batches: [], prompt: '' };
       const T = turns[turn];
-      if (m.recipient === 'web.run' && m.content) {
+      if ((m.recipient === 'web.run' || m.recipient === 'web') && m.content) {
         const text = typeof m.content.text === 'string' ? m.content.text : (m.content.parts || []).filter(x => typeof x === 'string').join('\n');
-        if (!text) return;
         batch++; cur = { turn, pos: T.batches.length, entries: [], seen: new Set() }; batches[batch] = cur; T.batches.push(batch);
-        text.split(/\r?\n/).forEach(l => parseLine(l, batch, prompt, turn));
+        const before = rows.length;
+        if (text) text.split(/\r?\n/).forEach(l => parseLine(l, batch, prompt, turn));
+        if (rows.length === before) {
+          meta.hiddenQueries++;
+          rows.push({ n: rows.length + 1, batch, turn, type: 'web', query: HIDDEN_Q, days: '', domain: '', reddit: 'no',
+            location: '', prompt, results: '', cited: '', locked: '', batchResults: '', batchCited: '', batchDomains: '', sources: [] });
+        }
         return;
       }
       if (role === 'tool' && cur && md.search_result_groups) {
@@ -207,9 +216,9 @@
     ['n', 'The line number, in the order ChatGPT ran the searches. 1 is the first search of the chat.', 'n = 43 means it was the 43rd search in this chat.'],
     ['batch', 'ChatGPT searches in rounds. It sends a few searches together, reads what came back, then may send another round. batch is the round number.', 'All lines with batch = 2 were sent together, after ChatGPT had read the results of batch 1.'],
     ['type', 'What kind of search it was. See the Types tab for the full list.', 'fast = a normal web search. business = a places search. image = a picture search. slow = a deeper web search.'],
-    ['query', 'The exact words ChatGPT sent to search, including any site: and quotes. This is the fan-out term.', 'query = "Shrimp Shack Camden" reviews portion sauce birthday'],
-    ['days', 'How recent the pages had to be, in days. 30 = last month. 365 = last year. 3650 = last ten years. Empty = no limit.', 'days = 365 on a Reddit search means ChatGPT only wanted Reddit posts from the last year.'],
-    ['domain', 'When filled, ChatGPT only searched that one website. Empty = the whole web. A site: inside the query does the same job.', 'domain = reddit.com means only Reddit was searched. site:linkedin.com/jobs in the query means only LinkedIn jobs pages.'],
+    ['query', 'The exact words ChatGPT sent to search, including any site: and quotes. This is the fan-out term.' + ' From September 2026 ChatGPT stopped sending this to the browser, so on new chats the line reads "query not exposed by ChatGPT" and the pages and citations are still shown. Chats saved before the change still have it.', 'query = "Shrimp Shack Camden" reviews portion sauce birthday'],
+    ['days', 'How recent the pages had to be, in days. 30 = last month. 365 = last year. 3650 = last ten years. Empty = no limit.' + ' Gone from new chats since September 2026, along with the query text, so this column is empty on them.', 'days = 365 on a Reddit search means ChatGPT only wanted Reddit posts from the last year.'],
+    ['domain', 'When filled, ChatGPT only searched that one website. Empty = the whole web. A site: inside the query does the same job.' + ' Gone from new chats since September 2026, along with the query text, so this column is empty on them.', 'domain = reddit.com means only Reddit was searched. site:linkedin.com/jobs in the query means only LinkedIn jobs pages.'],
     ['results', 'How many pages came back. For a line with a domain or a site:, it is the count from that website in that round. For an open search, it is the count for the whole round. ChatGPT records results per round, not per query, so lines in the same round that search the same place show the same number. Empty for business and image lines, whose results are not exposed.', 'results = 12 with domain = sexyfish.com means 12 pages from sexyfish.com came back. results = 0 with domain = reddit.com means the Reddit search returned nothing, so Reddit could not be cited from it.'],
     ['cited', 'How many of those pages were shown as a source in the answer, either as a citation chip in the text or in the Sources list at the end. Empty while the answer is still being written, or when the answer for that prompt is not stored in the chat.', 'results = 11, cited = 3 means 11 pages came back and 3 were shown as sources. results = 84, cited = 0 means ChatGPT read 84 pages and credited none of them.'],
     ['+ (first column)', 'Opens the line to show the pages it got back. A tick marks the ones shown as a source in the answer, a dot marks the rest. The first line inside groups them by website with the cited count per website. Expand all opens every line at once, for screenshots.', '✓ apps.shopify.com/tidio-chat/reviews (cited)  ·  reddit.com/r/shopify/comments/... (fetched, not cited)'],
@@ -330,7 +339,8 @@
     body.innerHTML = '';
     const red = rows.filter(r => r.reddit === 'yes').length;
     const nb = rows.length ? rows[rows.length - 1].batch : 0;
-    status.textContent = rows.length + ' search line(s) in ' + nb + ' round(s) across ' + meta.prompts + ' prompt(s). ' + red + ' mention Reddit.' + stateNote();
+    const hidden = meta.hiddenQueries ? ' ChatGPT is no longer exposing the query text for ' + meta.hiddenQueries + ' of these round(s), so the pages and citations are shown and the query, freshness window and site limit are not.' : '';
+    status.textContent = rows.length + ' search line(s) in ' + nb + ' round(s) across ' + meta.prompts + ' prompt(s). ' + red + ' mention Reddit.' + hidden + stateNote();
     headline.textContent = rows.length ? 'Fetched ' + meta.fetched + ' page(s), ' + meta.cited + ' shown as sources in the answers. Reddit: ' + meta.redditFetched + ' fetched, ' + meta.redditCited + ' cited.' + (meta.unknownTurns ? ' (' + meta.unknownTurns + ' prompt(s) have no finished answer yet, so their cited counts are left empty.)' : '') : '';
     promptLine.textContent = promptSummary();
     bE.textContent = expanded.size ? 'Collapse all' : 'Expand all';
