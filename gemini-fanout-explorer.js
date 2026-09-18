@@ -5,7 +5,7 @@
   //
   // Gemini exposes less than ChatGPT or Claude: it shows the sources it cited, not the wider pool it read and passed
   // over, and its search queries live only in the stored conversation, never on screen. This surfaces both.
-  const BUILD = '2026-09-18.2';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-18.3';   // shown in the panel so a stale install can be spotted at a glance
   const queries = [];   // { n, turn, query, prompt, reddit }
   const sources = [];   // { n, turn, url, raw, host, title, snippet, supports, prompt, reddit }
   const meta = { id: '', at: '', prompts: 0, promptList: [], model: '', queryCount: 0, sourceCount: 0, domainCount: 0, redditQueries: 0, redditSources: 0 };
@@ -180,7 +180,14 @@
   // size are remembered in this browser. Double-click the title to put it back where it started.
   const POS_KEY = 'fo-export:pos:v1';
   const readPos = () => { try { return JSON.parse(localStorage.getItem(POS_KEY) || 'null'); } catch (e) { return null; } };
-  const savePos = () => { const r = box.getBoundingClientRect(); try { localStorage.setItem(POS_KEY, JSON.stringify({ left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) })); } catch (e) {} };
+  // A drag saves where the panel is, not how tall it happened to be. Only a real resize saves the size,
+  // so the panel keeps growing with its content until the reader decides otherwise.
+  const savePos = (withSize) => {
+    const r = box.getBoundingClientRect(), prev = readPos() || {}, o = { left: Math.round(r.left), top: Math.round(r.top) };
+    if (withSize) { o.width = Math.round(r.width); o.height = Math.round(r.height); }
+    else if (prev.width) { o.width = prev.width; o.height = prev.height; }
+    try { localStorage.setItem(POS_KEY, JSON.stringify(o)); } catch (e) {}
+  };
   const clearPos = () => { try { localStorage.removeItem(POS_KEY); } catch (e) {} };
 
   const layout = () => {
@@ -232,7 +239,7 @@
   let lastSize = '';
   box.addEventListener('pointerup', () => setTimeout(() => {
     const s = box.offsetWidth + 'x' + box.offsetHeight;
-    if (lastSize && s !== lastSize) savePos();
+    if (lastSize && s !== lastSize) savePos(true);
     lastSize = s;
   }, 0));
   lastSize = box.offsetWidth + 'x' + box.offsetHeight;
