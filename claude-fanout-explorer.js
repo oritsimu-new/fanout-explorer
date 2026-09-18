@@ -2,6 +2,7 @@
   // Claude Fanout Explorer, a bookmarklet for claude.ai. Reads the chat you have open (live while Claude answers, or a saved chat) and lists every
   // web search Claude ran, every page it opened, the pages each search got back, and which of those were cited.
   // Read-only: it sends no prompts and changes nothing.
+  const BUILD = '2026-09-18';   // shown in the panel so a stale install can be spotted at a glance
   const rows = [];
   const turns = [];     // turns[t] = { prompt, cited: Set, hasAnswer }
   const meta = { id: '', at: '', prompts: 0, promptList: [], fetched: 0, cited: 0, redditFetched: 0, redditCited: 0, unknownTurns: 0 };
@@ -164,9 +165,10 @@
   // ---------- Panel ----------
   const old = document.getElementById('cs-export'); if (old) old.remove();
   const box = document.createElement('div'); box.id = 'cs-export';
-  box.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;width:min(1000px,96vw);max-height:88vh;overflow:auto;background:rgb(17,17,17);color:rgb(235,235,235);font:13px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;border:1px solid rgb(70,70,70);border-radius:10px;padding:14px;box-shadow:0 8px 30px rgba(0,0,0,.5);text-align:left';
-  const bar = document.createElement('div'); bar.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px';
-  const title = document.createElement('strong'); title.textContent = 'Claude Fanout Explorer'; title.style.cssText = 'font-size:14px;margin-right:auto';
+  box.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;box-sizing:border-box;width:min(1000px,96vw);max-width:calc(100vw - 24px);max-height:88vh;overflow:auto;overscroll-behavior:contain;background:rgb(17,17,17);color:rgb(235,235,235);font:13px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;border:1px solid rgb(70,70,70);border-radius:10px;padding:14px;box-shadow:0 8px 30px rgba(0,0,0,.5);text-align:left';
+  const bar = document.createElement('div'); bar.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:sticky;top:-14px;z-index:5;background:rgb(17,17,17);margin:-14px -14px 10px;padding:14px 14px 10px';
+  const title = document.createElement('strong'); title.textContent = 'Claude Fanout Explorer'; title.style.cssText = 'font-size:14px';
+  const ver = document.createElement('span'); ver.textContent = 'v' + BUILD; ver.title = 'Build date of the code you are running. The install page always has the newest one.'; ver.style.cssText = 'font-size:11px;color:rgb(150,150,150);margin-right:auto';
   const mkBtn = (label) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.style.cssText = 'background:rgb(43,43,43);color:rgb(255,255,255);border:1px solid rgb(90,90,90);border-radius:6px;padding:6px 10px;cursor:pointer;font:inherit'; return b; };
   const flash = (b, txt) => { const o = b.textContent; b.textContent = txt; setTimeout(() => { b.textContent = o; }, 1500); };
   const bQ = mkBtn('Copy queries only'), bT = mkBtn('Copy table (TSV)'), bC = mkBtn('Download CSV'), bS = mkBtn('Download sources CSV'), bL = mkBtn('Live: on'), bR = mkBtn('Refresh'), bX = mkBtn('Close');
@@ -180,8 +182,25 @@
   const body = document.createElement('div');
   const index = document.createElement('div'); index.hidden = true;
   const types = document.createElement('div'); types.hidden = true;
-  bar.append(title, bQ, bT, bC, bS, bL, bR, bX); tabs.append(tabTable, tabIndex, tabTypes, bE);
+  bar.append(title, ver, bQ, bT, bC, bS, bL, bR, bX); tabs.append(tabTable, tabIndex, tabTypes, bE);
   box.append(bar, tabs, status, headline, promptLine, body, index, types); document.body.appendChild(box);
+  // A transform, filter or containment on an ancestor makes position:fixed resolve against that ancestor
+  // instead of the viewport, which can push the panel and its Close button off screen. Measure after mount
+  // and correct. vh units also misreport on some setups, so the height cap is set in pixels.
+  const fitPanel = () => {
+    box.style.maxHeight = Math.max(220, innerHeight - 24) + 'px';
+    let r = box.getBoundingClientRect();
+    const off = () => { r = box.getBoundingClientRect(); return r.top < -1 || r.left < -1 || r.right > innerWidth + 1; };
+    if (off() && box.parentNode !== document.documentElement) document.documentElement.appendChild(box);
+    if (off()) {
+      box.style.transform = 'none';
+      box.style.right = 'auto';
+      box.style.top = (12 - (r.top - parseFloat(box.style.top || 12))) + 'px';
+      box.style.left = Math.max(12, innerWidth - box.offsetWidth - 12) + 'px';
+    }
+  };
+  fitPanel();
+  addEventListener('resize', fitPanel);
   const showTab = (which) => {
     const on = 'rgb(255,255,255)', off = 'rgb(170,170,170)';
     [[tabTable, 'table'], [tabIndex, 'index'], [tabTypes, 'types']].forEach(([b, k]) => { b.style.color = which === k ? on : off; b.style.borderBottomColor = which === k ? on : 'transparent'; });
@@ -379,7 +398,16 @@
   };
   bL.onclick = () => { live = !live; bL.textContent = live ? 'Live: on' : 'Live: off'; if (live) { settled = false; } render(); };
   bR.onclick = () => { if (!chatId) return; settled = false; backoffUntil = 0; load(true); };
-  bX.onclick = () => { closed = true; clearTimeout(timer); box.remove(); };
+  const closePanel = () => { closed = true; clearTimeout(timer); removeEventListener('resize', fitPanel); document.removeEventListener('keydown', onKey, true); box.remove(); };
+  bX.onclick = closePanel;
+  // Escape is the guaranteed way out, in case the page's own layout ever hides the Close button.
+  const onKey = (e) => {
+    if (e.key !== 'Escape' || !box.isConnected) return;
+    const t = e.target, tag = t && t.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
+    closePanel();
+  };
+  document.addEventListener('keydown', onKey, true);
   showTab('table');
   tick();
 })();
