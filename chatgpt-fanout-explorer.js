@@ -13,7 +13,7 @@
   //   - in Work workspaces the saved chat keeps metadata.search_queries as [{type, q}].
   // A round with no query from either source is kept and labelled rather than dropped.
   const HIDDEN_Q = 'query not exposed by ChatGPT';
-  const BUILD = '2026-09-21';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-21.2';   // shown in the panel so a stale install can be spotted at a glance
   const NO_RESULTS = ['business', 'image'];   // their results are not exposed in the payload
 
   const rows = [];
@@ -206,7 +206,8 @@
       const url = normUrl(e.url);
       if (b.seen.has(url)) return; b.seen.add(url);
       const rid = e.ref_id || {};
-      b.entries.push({ url, raw: String(e.url), host: hostOf(e.url), key: b.turn + '|' + pos + '|' + rid.ref_type + '|' + rid.ref_index, cited: false });
+      b.entries.push({ url, raw: String(e.url), host: hostOf(e.url), key: b.turn + '|' + pos + '|' + rid.ref_type + '|' + rid.ref_index, cited: false,
+        title: typeof e.title === 'string' ? e.title.slice(0, 160) : '', date: typeof e.pub_date === 'number' && e.pub_date > 0 ? e.pub_date : 0 });
     };
     path.forEach((n, idx) => {
       const m = n.message; if (!m || !m.author) return;
@@ -318,16 +319,17 @@
   // Where a row's query came from: the chat itself (pre-September text format or a Work workspace), the live capture, or nowhere.
   const qsrcOf = r => r.qsrc === 'live' ? 'captured live' : r.qsrc === 'saved' ? 'saved chat' : r.query === HIDDEN_Q ? 'not exposed' : 'saved chat';
   const toCSV = () => {
-    const head = ['n', 'batch', 'type', 'query', 'query_source', 'freshness_days', 'domain', 'results', 'cited', 'reddit', 'location', 'locked_host', 'round_results', 'round_cited', 'round_top_domains', 'sources', 'cited_sources', 'prompt', 'conversation_id', 'captured_at'];
-    return [head.join(',')].concat(view().map(r => [r.n, r.batch, r.type, r.query, qsrcOf(r), r.days, r.domain, r.results, r.cited, r.reddit, r.location, r.locked, r.batchResults, r.batchCited, r.batchDomains, srcList(r, false), srcList(r, true), r.prompt, meta.id, meta.at].map(csvCell).join(','))).join('\n');
+    const head = ['n', 'batch', 'type', 'query', 'query_source', 'freshness_days', 'domain', 'results', 'cited', 'dated_pages', 'median_page_age_days', 'pages_under_30_days', 'reddit', 'location', 'locked_host', 'round_results', 'round_cited', 'round_top_domains', 'sources', 'cited_sources', 'prompt', 'conversation_id', 'captured_at'];
+    const agesOf = r => r.sources.filter(e => e.date).map(e => ageOf(e.date));
+    return [head.join(',')].concat(view().map(r => { const ag = agesOf(r); return [r.n, r.batch, r.type, r.query, qsrcOf(r), r.days, r.domain, r.results, r.cited, ag.length, ag.length ? median(ag) : '', ag.filter(a => a <= 30).length, r.reddit, r.location, r.locked, r.batchResults, r.batchCited, r.batchDomains, srcList(r, false), srcList(r, true), r.prompt, meta.id, meta.at].map(csvCell).join(','); })).join('\n');
   };
   // One row per search line, followed by one row per page it got back (row_kind = search / source). Filter on row_kind in a spreadsheet.
   const toSourcesCSV = () => {
-    const head = ['row_kind', 'n', 'batch', 'type', 'query', 'freshness_days', 'domain', 'results', 'cited', 'source_url', 'source_domain', 'source_cited', 'prompt', 'conversation_id', 'captured_at'];
+    const head = ['row_kind', 'n', 'batch', 'type', 'query', 'freshness_days', 'domain', 'results', 'cited', 'source_url', 'source_domain', 'source_cited', 'source_title', 'source_published', 'source_age_days', 'prompt', 'conversation_id', 'captured_at'];
     const out = [head.join(',')];
     view().forEach(r => {
-      out.push(['search', r.n, r.batch, r.type, r.query, r.days, r.domain, r.results, r.cited, '', '', '', r.prompt, meta.id, meta.at].map(csvCell).join(','));
-      r.sources.forEach(e => out.push(['source', r.n, r.batch, r.type, r.query, r.days, r.domain, r.results, r.cited, e.raw, e.host, r.known ? (e.cited ? 'yes' : 'no') : '', r.prompt, meta.id, meta.at].map(csvCell).join(',')));
+      out.push(['search', r.n, r.batch, r.type, r.query, r.days, r.domain, r.results, r.cited, '', '', '', '', '', '', r.prompt, meta.id, meta.at].map(csvCell).join(','));
+      r.sources.forEach(e => out.push(['source', r.n, r.batch, r.type, r.query, r.days, r.domain, r.results, r.cited, e.raw, e.host, r.known ? (e.cited ? 'yes' : 'no') : '', e.title || '', e.date ? dateStr(e.date) : '', e.date ? ageOf(e.date) : '', r.prompt, meta.id, meta.at].map(csvCell).join(',')));
     });
     return out.join('\n');
   };
@@ -351,8 +353,9 @@
     ['domain', 'When filled, ChatGPT only searched that one website. Empty = the whole web. A site: inside the query does the same job.' + ' Gone from new chats since September 2026, along with the query text, so this column is empty on them.', 'domain = reddit.com means only Reddit was searched. site:linkedin.com/jobs in the query means only LinkedIn jobs pages.'],
     ['results', 'How many pages came back. For a line with a domain or a site:, it is the count from that website in that round. For an open search, it is the count for the whole round. ChatGPT records results per round, not per query, so lines in the same round that search the same place show the same number. Empty for business and image lines, whose results are not exposed.', 'results = 12 with domain = sexyfish.com means 12 pages from sexyfish.com came back. results = 0 with domain = reddit.com means the Reddit search returned nothing, so Reddit could not be cited from it.'],
     ['cited', 'How many of those pages were shown as a source in the answer, either as a citation chip in the text or in the Sources list at the end. Empty while the answer is still being written, or when the answer for that prompt is not stored in the chat.', 'results = 11, cited = 3 means 11 pages came back and 3 were shown as sources. results = 84, cited = 0 means ChatGPT read 84 pages and credited none of them.'],
-    ['+ (first column)', 'Opens the line to show the pages it got back. A tick marks the ones shown as a source in the answer, a dot marks the rest. The first line inside groups them by website with the cited count per website. Expand all opens every line at once, for screenshots.', '✓ apps.shopify.com/tidio-chat/reviews (cited)  ·  reddit.com/r/shopify/comments/... (fetched, not cited)'],
+    ['+ (first column)', 'Opens the line to show the pages that came back, grouped by website with the count and the cited count on each. A tick marks a page shown as a source in the answer, a dot the rest. Hover a page for its title and publication date. ChatGPT returns one pool of pages for the whole batch, so every query in a batch opens the same list.', ''],
     ['headline (above the table)', 'Fetched = pages that came back across the whole chat, each counted once. Shown as sources = how many of those appeared in an answer. Reddit = the same two numbers for reddit.com only.', 'Fetched 204 pages, 19 shown as sources. Reddit: 57 fetched, 5 cited.'],
+    ['page age (inside a line)', 'ChatGPT records a publication date for many of the pages it fetches, and the age shows next to each of those pages: 12d is 12 days old, 3mo three months, 1.2y just over a year. The first line inside gives the median age of the dated pages, how many are from the last 30 days and the median age of the cited ones. It is the closest thing left to the freshness window ChatGPT used to send: not what it asked for, but how old what came back actually was. Pages with no date show no age.', 'median age 3mo, 8 from the last 30 days, cited pages median 41d'],
     ['highlighted rows', 'Lines where the query or the domain mentions Reddit.', ''],
     ['reddit (exports only)', 'yes if the query or the domain mentions Reddit, otherwise no.', ''],
     ['location (exports only)', 'For business lines, the place ChatGPT searched around.', 'location = West Finchley, London, UK'],
@@ -510,19 +513,44 @@
 
   // ---------- Table ----------
   const expanded = new Set();
+  // Page age: ChatGPT records a publication date for many of the pages it fetches. It is the closest thing left to
+  // the freshness window it used to send: not what it asked for, but how old what came back actually was.
+  const ageOf = ts => ts ? Math.max(0, Math.round((Date.now() / 1000 - ts) / 86400)) : null;
+  const ageLabel = d => d == null ? '' : d < 1 ? 'today' : d < 30 ? d + 'd' : d < 365 ? Math.round(d / 30) + 'mo' : (Math.round(d / 36.5) / 10) + 'y';
+  const median = a => a.length ? a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)] : null;
+  const dateStr = ts => { try { return new Date(ts * 1000).toISOString().slice(0, 10); } catch (e) { return ''; } };
   const detailFor = (r) => {
     const wrap = document.createElement('div'); wrap.style.cssText = 'font-size:12px;line-height:1.35;color:rgb(200,200,200);padding:2px 0 8px 26px';
     if (NO_RESULTS.includes(r.type)) { wrap.textContent = 'Results for ' + r.type + ' lines are not exposed in the payload.'; return wrap; }
     if (!r.sources.length) { wrap.textContent = 'Nothing came back for this search.'; return wrap; }
-    const byHost = {}; r.sources.forEach(e => { const h = byHost[e.host] || (byHost[e.host] = { n: 0, c: 0 }); h.n++; if (e.cited) h.c++; });
-    const sum = document.createElement('div'); sum.style.cssText = 'margin-bottom:4px;color:rgb(235,235,235)';
-    sum.textContent = r.sources.length + ' page' + (r.sources.length === 1 ? '' : 's') + (r.known ? ', ' + r.sources.filter(e => e.cited).length + ' cited' : '') + '. ' + Object.keys(byHost).sort((a, b) => byHost[b].n - byHost[a].n).map(h => h + ' ' + byHost[h].n + (r.known ? ' (' + byHost[h].c + ' cited)' : '')).join(', ');
-    const list = document.createElement('div'); if (r.sources.length > 6) list.style.cssText = 'column-count:2;column-gap:28px';
-    r.sources.forEach(e => {
-      const d = document.createElement('div'); d.style.cssText = 'break-inside:avoid;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-      const mark = document.createElement('span'); mark.textContent = e.cited ? '✓ ' : '· '; mark.style.cssText = e.cited ? 'color:rgb(120,220,140);font-weight:700' : 'color:rgb(120,120,120)';
-      const a = document.createElement('a'); a.href = e.raw; a.target = '_blank'; a.rel = 'noopener'; a.textContent = shortUrl(e.raw); a.title = e.raw; a.style.cssText = 'color:' + (e.cited ? 'rgb(235,235,235)' : 'rgb(170,170,170)') + ';text-decoration:none';
-      d.append(mark, a); list.appendChild(d);
+    const n = r.sources.length, cited = r.sources.filter(e => e.cited).length;
+    const inBatch = rows.filter(x => x.batch === r.batch).length;
+    const ages = r.sources.filter(e => e.date).map(e => ageOf(e.date));
+    const citedAges = r.sources.filter(e => e.cited && e.date).map(e => ageOf(e.date));
+    const sum = document.createElement('div'); sum.style.cssText = 'margin-bottom:6px;color:rgb(235,235,235)';
+    sum.textContent = n + ' page' + (n === 1 ? '' : 's') + ' came back for ' + (inBatch > 1 ? 'the ' + inBatch + ' queries in this batch' : 'this batch') + (r.known ? ', ' + cited + ' cited' : '') + '.'
+      + (ages.length ? ' ' + ages.length + ' carry a date: median age ' + ageLabel(median(ages)) + ', ' + ages.filter(a => a <= 30).length + ' from the last 30 days' + (r.known && citedAges.length ? ', cited pages median ' + ageLabel(median(citedAges)) : '') + '.' : '');
+    const byHost = {};
+    r.sources.forEach(e => { const h = byHost[e.host] || (byHost[e.host] = { n: 0, c: 0, list: [] }); h.n++; if (e.cited) h.c++; h.list.push(e); });
+    const hosts = Object.keys(byHost).sort((a, b) => (byHost[b].c - byHost[a].c) || (byHost[b].n - byHost[a].n) || a.localeCompare(b));
+    const list = document.createElement('div'); if (n > 6) list.style.cssText = 'column-count:2;column-gap:28px';
+    hosts.forEach(h => {
+      const g = byHost[h];
+      const block = document.createElement('div'); block.style.cssText = 'break-inside:avoid;margin:0 0 7px';
+      const head = document.createElement('div'); head.style.cssText = 'color:rgb(235,235,235);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      head.textContent = h + '  ' + g.n + ' page' + (g.n === 1 ? '' : 's') + (r.known ? ', ' + g.c + ' cited' : '');
+      block.appendChild(head);
+      g.list.slice().sort((a, b) => (b.cited - a.cited) || a.url.localeCompare(b.url)).forEach(e => {
+        const d = document.createElement('div'); d.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:4px';
+        const mark = document.createElement('span'); mark.textContent = e.cited ? '✓ ' : '· '; mark.style.cssText = e.cited ? 'color:rgb(120,220,140);font-weight:700' : 'color:rgb(120,120,120)';
+        const a = document.createElement('a'); a.href = e.raw; a.target = '_blank'; a.rel = 'noopener'; a.textContent = shortUrl(e.raw);
+        a.title = (e.title ? e.title + '\n' : '') + (e.date ? 'Published ' + dateStr(e.date) + '\n' : '') + e.raw;
+        a.style.cssText = 'color:' + (e.cited ? 'rgb(235,235,235)' : 'rgb(170,170,170)') + ';text-decoration:none';
+        d.append(mark, a);
+        if (e.date) { const age = document.createElement('span'); age.textContent = '  ' + ageLabel(ageOf(e.date)); age.title = 'Published ' + dateStr(e.date); age.style.cssText = 'color:rgb(130,130,130);font-size:11px'; d.appendChild(age); }
+        block.appendChild(d);
+      });
+      list.appendChild(block);
     });
     wrap.append(sum, list);
     return wrap;
