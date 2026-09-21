@@ -13,13 +13,15 @@
   //   - in Work workspaces the saved chat keeps metadata.search_queries as [{type, q}].
   // A round with no query from either source is kept and labelled rather than dropped.
   const HIDDEN_Q = 'query not exposed by ChatGPT';
-  const BUILD = '2026-09-21.2';   // shown in the panel so a stale install can be spotted at a glance
+  const HIDDEN_FIRST = 'query not captured: the bookmark was not running when this prompt was sent';
+  const HIDDEN_LATER = 'follow-up batch: ChatGPT does not send these queries';
+  const BUILD = '2026-09-21.3';   // shown in the panel so a stale install can be spotted at a glance
   const NO_RESULTS = ['business', 'image'];   // their results are not exposed in the payload
 
   const rows = [];
   const batches = [];   // batches[b] = { turn, pos, entries: [{url, raw, host, key, cited}] }
   const turns = [];     // turns[t] = { keys, urls, hasAnswer, batches, prompt }
-  const meta = { id: '', at: '', prompts: 0, promptList: [], fetched: 0, cited: 0, redditFetched: 0, redditCited: 0, unknownTurns: 0, hiddenQueries: 0, liveRounds: 0, savedRounds: 0 };
+  const meta = { id: '', title: '', at: '', prompts: 0, promptList: [], fetched: 0, cited: 0, redditFetched: 0, redditCited: 0, unknownTurns: 0, hiddenQueries: 0, liveRounds: 0, savedRounds: 0 };
 
   const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, '').toLowerCase(); } catch (e) { return ''; } };
   const normUrl = u => String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[?\x23]/)[0].replace(/\/$/, '');
@@ -177,6 +179,7 @@
 
   const extract = (j) => {
     rows.length = 0; batches.length = 0; turns.length = 0;
+    meta.title = typeof j.title === 'string' ? j.title : '';
     meta.fetched = 0; meta.cited = 0; meta.redditFetched = 0; meta.redditCited = 0; meta.unknownTurns = 0; meta.hiddenQueries = 0; meta.liveRounds = 0; meta.savedRounds = 0; meta.promptList = [];
     let prompt = '', batch = 0, turn = 0, cur = null;
     const path = activePath(j);
@@ -235,7 +238,7 @@
               reddit: /reddit/i.test(q) ? 'yes' : 'no', location: '', prompt, results: '', cited: '', locked: '', batchResults: '', batchCited: '', batchDomains: '', sources: [], qsrc: saved ? 'saved' : 'live' }));
           } else {
             meta.hiddenQueries++;
-            rows.push({ n: rows.length + 1, batch, turn, type: 'web', query: HIDDEN_Q, days: '', domain: '', reddit: 'no',
+            rows.push({ n: rows.length + 1, batch, turn, type: 'web', query: cur.pos === 0 ? HIDDEN_FIRST : HIDDEN_LATER, hidden: true, days: '', domain: '', reddit: 'no',
               location: '', prompt, results: '', cited: '', locked: '', batchResults: '', batchCited: '', batchDomains: '', sources: [], qsrc: '' });
           }
         }
@@ -292,16 +295,19 @@
       r.sources = mine.slice().sort((a, b) => (b.cited - a.cited) || a.host.localeCompare(b.host) || a.url.localeCompare(b.url));
       r.results = mine.length;
       r.cited = known ? mine.filter(e => e.cited).length : '';
+      const ag = mine.filter(e => e.date).map(e => ageOf(e.date));
+      r.age = ag.length ? median(ag) : '';
     });
     meta.unknownTurns = turns.filter(t => t && !t.hasAnswer).length;
   };
 
   // ---------- Sorting (click a column header; exports follow the current order, n keeps the original order) ----------
-  const COLS = ['n', 'batch', 'type', 'query', 'days', 'domain', 'results', 'cited'];
-  const NUMERIC = ['n', 'batch', 'days', 'results', 'cited'];
+  const COLS = ['n', 'batch', 'type', 'query', 'days', 'age', 'domain', 'results', 'cited'];
+  const LABELS = { age: 'page age' };
+  const NUMERIC = ['n', 'batch', 'days', 'age', 'results', 'cited'];
   let sortKey = 'n', sortDir = 1;
   const shown = r => r.type === 'business' ? r.location + ' : ' + r.query : r.query;
-  const cell = (r, k) => k === 'query' ? shown(r) : r[k];
+  const cell = (r, k) => k === 'query' ? shown(r) : k === 'age' ? (r.age === '' || r.age == null ? '' : ageLabel(r.age)) : r[k];
   const view = () => {
     const v = rows.slice();
     v.sort((a, b) => {
@@ -317,7 +323,7 @@
   const csvCell = s => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
   const srcList = (r, onlyCited) => r.sources.filter(e => !onlyCited || e.cited).map(e => e.raw).join(' | ');
   // Where a row's query came from: the chat itself (pre-September text format or a Work workspace), the live capture, or nowhere.
-  const qsrcOf = r => r.qsrc === 'live' ? 'captured live' : r.qsrc === 'saved' ? 'saved chat' : r.query === HIDDEN_Q ? 'not exposed' : 'saved chat';
+  const qsrcOf = r => r.qsrc === 'live' ? 'captured live' : r.qsrc === 'saved' ? 'saved chat' : r.hidden ? 'not exposed' : 'saved chat';
   const toCSV = () => {
     const head = ['n', 'batch', 'type', 'query', 'query_source', 'freshness_days', 'domain', 'results', 'cited', 'dated_pages', 'median_page_age_days', 'pages_under_30_days', 'reddit', 'location', 'locked_host', 'round_results', 'round_cited', 'round_top_domains', 'sources', 'cited_sources', 'prompt', 'conversation_id', 'captured_at'];
     const agesOf = r => r.sources.filter(e => e.date).map(e => ageOf(e.date));
@@ -340,7 +346,8 @@
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   };
-  const stamp = () => 'chatgpt-fanout-' + meta.id.slice(0, 8) + '-' + meta.at.slice(0, 16).replace(/[:T]/g, '-');
+  const slug = t => String(t || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  const stamp = () => 'chatgpt-fanout-' + (slug(meta.title) || meta.id.slice(0, 8)) + '-' + meta.at.slice(0, 16).replace(/[:T]/g, '-');
 
   // ---------- Index tab: what every column means, in plain English ----------
   const INDEX = [
@@ -353,9 +360,9 @@
     ['domain', 'When filled, ChatGPT only searched that one website. Empty = the whole web. A site: inside the query does the same job.' + ' Gone from new chats since September 2026, along with the query text, so this column is empty on them.', 'domain = reddit.com means only Reddit was searched. site:linkedin.com/jobs in the query means only LinkedIn jobs pages.'],
     ['results', 'How many pages came back. For a line with a domain or a site:, it is the count from that website in that round. For an open search, it is the count for the whole round. ChatGPT records results per round, not per query, so lines in the same round that search the same place show the same number. Empty for business and image lines, whose results are not exposed.', 'results = 12 with domain = sexyfish.com means 12 pages from sexyfish.com came back. results = 0 with domain = reddit.com means the Reddit search returned nothing, so Reddit could not be cited from it.'],
     ['cited', 'How many of those pages were shown as a source in the answer, either as a citation chip in the text or in the Sources list at the end. Empty while the answer is still being written, or when the answer for that prompt is not stored in the chat.', 'results = 11, cited = 3 means 11 pages came back and 3 were shown as sources. results = 84, cited = 0 means ChatGPT read 84 pages and credited none of them.'],
-    ['+ (first column)', 'Opens the line to show the pages that came back, grouped by website with the count and the cited count on each. A tick marks a page shown as a source in the answer, a dot the rest. Hover a page for its title and publication date. ChatGPT returns one pool of pages for the whole batch, so every query in a batch opens the same list.', ''],
+    ['+ (first column)', 'Opens the line to show the pages that came back, grouped by how each website did: every website with the same page count and cited count shares one group, cited groups first, so the websites that returned a single page and got nothing cited sit in one list. A tick marks a page shown as a source in the answer, a dot the rest, and the age next to each page is its publication date read against today. Hover a page for its title and date. ChatGPT returns one pool of pages for the whole batch, so every query in a batch opens the same list.', ''],
     ['headline (above the table)', 'Fetched = pages that came back across the whole chat, each counted once. Shown as sources = how many of those appeared in an answer. Reddit = the same two numbers for reddit.com only.', 'Fetched 204 pages, 19 shown as sources. Reddit: 57 fetched, 5 cited.'],
-    ['page age (inside a line)', 'ChatGPT records a publication date for many of the pages it fetches, and the age shows next to each of those pages: 12d is 12 days old, 3mo three months, 1.2y just over a year. The first line inside gives the median age of the dated pages, how many are from the last 30 days and the median age of the cited ones. It is the closest thing left to the freshness window ChatGPT used to send: not what it asked for, but how old what came back actually was. Pages with no date show no age.', 'median age 3mo, 8 from the last 30 days, cited pages median 41d'],
+    ['page age', 'The median age of the dated pages that came back for the batch. ChatGPT records a publication date for many of the pages it fetches, and this column reads them: 2mo means half the dated pages are two months old or newer. Hover the cell for the newest, the oldest, how many are from the last 30 days and the median age of the cited pages. Inside the line each dated page shows its own age. The freshness window in the days column was what ChatGPT asked for; page age is what it actually got. Empty when none of the pages carry a date.', 'page age = 2mo. Hover: 26 of 58 pages carry a date, newest 6d, oldest 8.7y, 5 from the last 30 days, cited pages median 41d'],
     ['highlighted rows', 'Lines where the query or the domain mentions Reddit.', ''],
     ['reddit (exports only)', 'yes if the query or the domain mentions Reddit, otherwise no.', ''],
     ['location (exports only)', 'For business lines, the place ChatGPT searched around.', 'location = West Finchley, London, UK'],
@@ -530,26 +537,42 @@
     const sum = document.createElement('div'); sum.style.cssText = 'margin-bottom:6px;color:rgb(235,235,235)';
     sum.textContent = n + ' page' + (n === 1 ? '' : 's') + ' came back for ' + (inBatch > 1 ? 'the ' + inBatch + ' queries in this batch' : 'this batch') + (r.known ? ', ' + cited + ' cited' : '') + '.'
       + (ages.length ? ' ' + ages.length + ' carry a date: median age ' + ageLabel(median(ages)) + ', ' + ages.filter(a => a <= 30).length + ' from the last 30 days' + (r.known && citedAges.length ? ', cited pages median ' + ageLabel(median(citedAges)) : '') + '.' : '');
+    // Pages grouped by how their website did: every website with the same page count and cited count shares one tier,
+    // so the thirty websites that returned one page and got nothing cited sit in one list rather than thirty headers.
     const byHost = {};
-    r.sources.forEach(e => { const h = byHost[e.host] || (byHost[e.host] = { n: 0, c: 0, list: [] }); h.n++; if (e.cited) h.c++; h.list.push(e); });
-    const hosts = Object.keys(byHost).sort((a, b) => (byHost[b].c - byHost[a].c) || (byHost[b].n - byHost[a].n) || a.localeCompare(b));
+    r.sources.forEach(e => { const h = byHost[e.host] || (byHost[e.host] = { host: e.host, n: 0, c: 0, list: [] }); h.n++; if (e.cited) h.c++; h.list.push(e); });
+    const tiers = {};
+    Object.values(byHost).forEach(h => { const k = h.n + '|' + (r.known ? h.c : 0); (tiers[k] || (tiers[k] = { n: h.n, c: r.known ? h.c : 0, hosts: [] })).hosts.push(h); });
+    const order = Object.values(tiers).sort((a, b) => (b.c - a.c) || (b.n - a.n));
+    const pageLine = (e, indent) => {
+      const d = document.createElement('div'); d.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:' + indent + 'px';
+      const mark = document.createElement('span'); mark.textContent = e.cited ? '✓ ' : '· '; mark.style.cssText = e.cited ? 'color:rgb(120,220,140);font-weight:700' : 'color:rgb(120,120,120)';
+      const age = document.createElement('span'); age.textContent = e.date ? ageLabel(ageOf(e.date)) : ''; age.title = e.date ? 'Published ' + dateStr(e.date) : 'No date recorded for this page';
+      age.style.cssText = 'display:inline-block;width:38px;color:rgb(185,185,185);font-size:11px';
+      const a = document.createElement('a'); a.href = e.raw; a.target = '_blank'; a.rel = 'noopener'; a.textContent = shortUrl(e.raw);
+      a.title = (e.title ? e.title + '\n' : '') + (e.date ? 'Published ' + dateStr(e.date) + '\n' : '') + e.raw;
+      a.style.cssText = 'color:' + (e.cited ? 'rgb(235,235,235)' : 'rgb(170,170,170)') + ';text-decoration:none';
+      d.append(mark, age, a);
+      return d;
+    };
+    const sortedPages = list => list.slice().sort((a, b) => (b.cited - a.cited) || a.url.localeCompare(b.url));
     const list = document.createElement('div'); if (n > 6) list.style.cssText = 'column-count:2;column-gap:28px';
-    hosts.forEach(h => {
-      const g = byHost[h];
-      const block = document.createElement('div'); block.style.cssText = 'break-inside:avoid;margin:0 0 7px';
+    order.forEach(t => {
+      const block = document.createElement('div'); block.style.cssText = 'break-inside:avoid;margin:0 0 8px';
       const head = document.createElement('div'); head.style.cssText = 'color:rgb(235,235,235);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-      head.textContent = h + '  ' + g.n + ' page' + (g.n === 1 ? '' : 's') + (r.known ? ', ' + g.c + ' cited' : '');
+      const hosts = t.hosts.sort((a, b) => a.host.localeCompare(b.host));
+      head.textContent = t.n + ' page' + (t.n === 1 ? '' : 's') + (r.known ? ', ' + t.c + ' cited' : '') + (hosts.length === 1 ? ': ' + hosts[0].host : ': ' + hosts.length + ' websites');
       block.appendChild(head);
-      g.list.slice().sort((a, b) => (b.cited - a.cited) || a.url.localeCompare(b.url)).forEach(e => {
-        const d = document.createElement('div'); d.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:4px';
-        const mark = document.createElement('span'); mark.textContent = e.cited ? '✓ ' : '· '; mark.style.cssText = e.cited ? 'color:rgb(120,220,140);font-weight:700' : 'color:rgb(120,120,120)';
-        const a = document.createElement('a'); a.href = e.raw; a.target = '_blank'; a.rel = 'noopener'; a.textContent = shortUrl(e.raw);
-        a.title = (e.title ? e.title + '\n' : '') + (e.date ? 'Published ' + dateStr(e.date) + '\n' : '') + e.raw;
-        a.style.cssText = 'color:' + (e.cited ? 'rgb(235,235,235)' : 'rgb(170,170,170)') + ';text-decoration:none';
-        d.append(mark, a);
-        if (e.date) { const age = document.createElement('span'); age.textContent = '  ' + ageLabel(ageOf(e.date)); age.title = 'Published ' + dateStr(e.date); age.style.cssText = 'color:rgb(130,130,130);font-size:11px'; d.appendChild(age); }
-        block.appendChild(d);
-      });
+      if (hosts.length === 1 || t.n === 1) {
+        // one website, or one page per website: the page lines carry the website themselves
+        hosts.forEach(h => sortedPages(h.list).forEach(e => block.appendChild(pageLine(e, 4))));
+      } else {
+        hosts.forEach(h => {
+          const hl = document.createElement('div'); hl.textContent = h.host; hl.style.cssText = 'color:rgb(200,200,200);padding:2px 0 0 4px';
+          block.appendChild(hl);
+          sortedPages(h.list).forEach(e => block.appendChild(pageLine(e, 12)));
+        });
+      }
       list.appendChild(block);
     });
     wrap.append(sum, list);
@@ -579,13 +602,13 @@
     bE.textContent = expanded.size ? 'Collapse all' : 'Expand all';
     if (!rows.length) return;
     const t = document.createElement('table'); t.style.cssText = 'border-collapse:collapse;width:100' + String.fromCharCode(37) + ';table-layout:fixed';
-    const WIDTHS = { n: 40, batch: 52, type: 62, days: 52, domain: 165, results: 62, cited: 52 };   // query takes the rest
+    const WIDTHS = { n: 40, batch: 52, type: 62, days: 52, age: 70, domain: 150, results: 62, cited: 52 };   // query takes the rest
     const tr = document.createElement('tr');
     const th0 = document.createElement('th'); th0.style.cssText = 'border-bottom:1px solid rgb(70,70,70);width:24px'; tr.appendChild(th0);
     COLS.forEach(k => {
       const th = document.createElement('th');
-      th.textContent = k + (sortKey === k ? (sortDir === 1 ? ' ▲' : ' ▼') : '');
-      th.title = 'Click to sort by ' + k;
+      th.textContent = (LABELS[k] || k) + (sortKey === k ? (sortDir === 1 ? ' ▲' : ' ▼') : '');
+      th.title = k === 'age' ? 'Median age of the dated pages that came back for this batch. Hover a cell for the spread. Click to sort.' : 'Click to sort by ' + (LABELS[k] || k);
       th.style.cssText = 'text-align:left;border-bottom:1px solid rgb(70,70,70);padding:4px 6px;color:' + (sortKey === k ? 'rgb(255,255,255)' : 'rgb(170,170,170)') + ';font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer;user-select:none' + (WIDTHS[k] ? ';width:' + WIDTHS[k] + 'px' : '');
       th.onclick = () => { if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = 1; } render(); };
       tr.appendChild(th);
@@ -603,7 +626,8 @@
         const td = document.createElement('td'); td.textContent = cell(r, k);
         td.style.cssText = 'border-bottom:1px solid rgb(42,42,42);padding:4px 6px;vertical-align:top;' + (k === 'query' ? 'word-break:break-word' : 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis') + (k === 'cited' && r.cited !== '' && r.cited > 0 ? ';color:rgb(120,220,140);font-weight:600' : '');
         if (k === 'domain' && r.domain) td.title = r.domain;
-        if (k === 'query') td.title = r.qsrc === 'live' ? 'Captured live while ChatGPT answered, kept for this chat in this browser' : r.qsrc === 'saved' ? 'From the saved chat' : r.query === HIDDEN_Q ? 'ChatGPT did not send this query to the browser' : '';
+        if (k === 'query') { td.title = r.qsrc === 'live' ? 'Captured live while ChatGPT answered, kept for this chat in this browser' : r.qsrc === 'saved' ? 'From the saved chat' : r.hidden ? 'ChatGPT did not send this query to the browser' : ''; if (r.hidden) td.style.cssText += ';color:rgb(140,140,140);font-style:italic'; }
+        if (k === 'age' && r.age !== '' && r.age != null) { const ag = r.sources.filter(e => e.date).map(e => ageOf(e.date)); const ca = r.sources.filter(e => e.cited && e.date).map(e => ageOf(e.date)); td.title = ag.length + ' of ' + r.sources.length + ' pages carry a date. Median ' + ageLabel(median(ag)) + ', newest ' + ageLabel(Math.min.apply(null, ag)) + ', oldest ' + ageLabel(Math.max.apply(null, ag)) + ', ' + ag.filter(a => a <= 30).length + ' from the last 30 days.' + (r.known && ca.length ? ' Cited pages median ' + ageLabel(median(ca)) + '.' : ''); }
         row.appendChild(td);
       });
       t.appendChild(row);
@@ -622,8 +646,8 @@
   const CACHE = 'fo-export:v1:';
   const saveCopy = () => {
     if (!meta.id || !rows.length) return;
-    const data = { at: meta.at, meta: { prompts: meta.prompts, promptList: meta.promptList, fetched: meta.fetched, cited: meta.cited, redditFetched: meta.redditFetched, redditCited: meta.redditCited, unknownTurns: meta.unknownTurns },
-      rows: rows.map(r => ({ n: r.n, batch: r.batch, turn: r.turn, type: r.type, query: r.query, days: r.days, domain: r.domain, reddit: r.reddit, location: r.location, prompt: r.prompt, results: r.results, cited: r.cited, locked: r.locked, batchResults: r.batchResults, batchCited: r.batchCited, batchDomains: r.batchDomains, known: r.known, sources: r.sources.map(e => [e.raw, e.host, e.cited ? 1 : 0]) })) };
+    const data = { at: meta.at, meta: { title: meta.title, prompts: meta.prompts, promptList: meta.promptList, fetched: meta.fetched, cited: meta.cited, redditFetched: meta.redditFetched, redditCited: meta.redditCited, unknownTurns: meta.unknownTurns },
+      rows: rows.map(r => ({ n: r.n, batch: r.batch, turn: r.turn, type: r.type, query: r.query, days: r.days, domain: r.domain, reddit: r.reddit, location: r.location, prompt: r.prompt, results: r.results, cited: r.cited, locked: r.locked, batchResults: r.batchResults, batchCited: r.batchCited, batchDomains: r.batchDomains, known: r.known, hidden: !!r.hidden, qsrc: r.qsrc || '', age: r.age, sources: r.sources.map(e => [e.raw, e.host, e.cited ? 1 : 0, e.date || 0, e.title || '']) })) };
     const write = () => localStorage.setItem(CACHE + meta.id, JSON.stringify(data));
     try { write(); } catch (e) { try { evict(10); write(); } catch (e2) {} }
     try { evict(30); } catch (e) {}
@@ -638,7 +662,7 @@
     try {
       const d = JSON.parse(localStorage.getItem(CACHE + id) || 'null'); if (!d || !d.rows) return false;
       rows.length = 0;
-      d.rows.forEach(r => { r.sources = (r.sources || []).map(x => ({ raw: x[0], url: normUrl(x[0]), host: x[1], cited: !!x[2] })); rows.push(r); });
+      d.rows.forEach(r => { r.sources = (r.sources || []).map(x => ({ raw: x[0], url: normUrl(x[0]), host: x[1], cited: !!x[2], date: x[3] || 0, title: x[4] || '' })); if (r.age == null) r.age = ''; rows.push(r); });
       Object.assign(meta, d.meta); meta.id = id; meta.at = d.at;
       return true;
     } catch (e) { return false; }
