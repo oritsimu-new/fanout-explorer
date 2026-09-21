@@ -5,17 +5,21 @@
   const SEARCH_TYPES = ['fast', 'slow', 'image', 'product', 'news', 'video', 'finance', 'weather', 'sports', 'business'];
   const ACTION_TYPES = ['open', 'find', 'click', 'length', 'screenshot', 'scroll'];
   const OPEN_WEB = ['fast', 'slow', 'news', 'product', 'video', 'finance', 'weather', 'sports', 'web'];
-  // From September 2026 ChatGPT stopped putting the query lines in the tool message body, on both free and
-  // Plus, and renamed the recipient to 'web' on some accounts. The searches and their results still arrive,
-  // so a round with no readable query is kept and labelled rather than dropped.
+  // From September 2026 ChatGPT no longer saves the query text with the chat: the tool message body is
+  // empty, the recipient is 'web' on some accounts, and the freshness window and site limit are gone.
+  // The queries do still reach the browser in two places, and this reads both:
+  //   - while ChatGPT answers, the stream carries metadata.search_model_queries for the first search
+  //     batch. The fetch tap below catches it as it passes and keeps it per chat in this browser.
+  //   - in Work workspaces the saved chat keeps metadata.search_queries as [{type, q}].
+  // A round with no query from either source is kept and labelled rather than dropped.
   const HIDDEN_Q = 'query not exposed by ChatGPT';
-  const BUILD = '2026-09-18.3';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-21';   // shown in the panel so a stale install can be spotted at a glance
   const NO_RESULTS = ['business', 'image'];   // their results are not exposed in the payload
 
   const rows = [];
   const batches = [];   // batches[b] = { turn, pos, entries: [{url, raw, host, key, cited}] }
   const turns = [];     // turns[t] = { keys, urls, hasAnswer, batches, prompt }
-  const meta = { id: '', at: '', prompts: 0, promptList: [], fetched: 0, cited: 0, redditFetched: 0, redditCited: 0, unknownTurns: 0, hiddenQueries: 0 };
+  const meta = { id: '', at: '', prompts: 0, promptList: [], fetched: 0, cited: 0, redditFetched: 0, redditCited: 0, unknownTurns: 0, hiddenQueries: 0, liveRounds: 0, savedRounds: 0 };
 
   const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, '').toLowerCase(); } catch (e) { return ''; } };
   const normUrl = u => String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[?\x23]/)[0].replace(/\/$/, '');
@@ -26,6 +30,100 @@
     return m ? m[1].replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase() : '';
   };
   const hostMatches = (h, locked) => h === locked || h.endsWith('.' + locked);
+
+  // ---------- Live query capture ----------
+  // Since September 2026 ChatGPT strips the query text from the saved chat, but while it answers it still
+  // streams the first search batch's queries to the browser as metadata.search_model_queries, and Work
+  // workspaces keep metadata.search_queries in the saved chat. This taps the page's own fetch, reads the
+  // answer stream as it passes and keeps the queries per chat in this browser, so a chat captured live keeps
+  // its queries for good. Installed once per page and kept after the panel closes, so every prompt sent in
+  // this tab from now on is captured. Nothing is sent anywhere.
+  const QSTORE = 'fo-export:q:v1';
+  const readQ = () => { try { return JSON.parse(localStorage.getItem(QSTORE) || '{}') || {}; } catch (e) { return {}; } };
+  const writeQ = (all) => {
+    try {
+      const ids = Object.keys(all).sort((a, b) => (all[b]._at || 0) - (all[a]._at || 0));
+      ids.slice(40).forEach(k => { delete all[k]; });   // keep the 40 most recent chats
+      localStorage.setItem(QSTORE, JSON.stringify(all));
+    } catch (e) {}
+  };
+  const queriesFrom = (md) => {
+    if (!md) return null;
+    if (md.search_model_queries && Array.isArray(md.search_model_queries.queries)) {
+      const q = md.search_model_queries.queries.filter(x => typeof x === 'string' && x.trim()).map(x => x.trim());
+      return q.length ? { q, t: [] } : null;
+    }
+    if (Array.isArray(md.search_queries) && md.search_queries.length) {
+      const q = [], t = [];
+      md.search_queries.forEach(x => { if (x && typeof x.q === 'string' && x.q.trim()) { q.push(x.q.trim()); t.push(typeof x.type === 'string' ? x.type : ''); } });
+      return q.length ? { q, t } : null;
+    }
+    return null;
+  };
+  const stashQueries = (convId, parentId, msgId, found) => {
+    if (!convId || !found) return;
+    const all = readQ(); const c = all[convId] || (all[convId] = {}); c._at = Date.now();
+    const rec = { q: found.q, t: found.t, msg: msgId || '', at: Date.now() };
+    if (parentId) c[parentId] = rec;
+    if (msgId) c['@' + msgId] = rec;
+    if (!parentId && !msgId) c['n' + Object.keys(c).length] = rec;
+    writeQ(all);
+    if (window.__foTap && window.__foTap.onCapture) { try { window.__foTap.onCapture(convId); } catch (e) {} }
+  };
+  if (!window.__foTap) {
+    const tap = window.__foTap = { onCapture: null, captured: 0, streams: 0 };
+    const nativeFetch = window.fetch;
+    const chatIdNow = () => (location.pathname.split('/c/')[1] || '').split(/[?\x23]/)[0];
+    const onEvent = (v, st) => {
+      const payload = v && v.v;
+      const cid = (v && v.conversation_id) || (payload && payload.conversation_id) || st.cid || chatIdNow();
+      if (cid) st.cid = cid;
+      const msg = payload && payload.message;
+      if (msg && msg.id) {
+        st.lastMsg = msg.id; st.lastParent = (msg.metadata && msg.metadata.parent_id) || '';
+        const f = queriesFrom(msg.metadata);
+        if (f) { tap.captured++; stashQueries(cid, st.lastParent, msg.id, f); }
+        return;
+      }
+      const patches = v && v.o === 'patch' && Array.isArray(payload) ? payload : (v && v.p ? [v] : []);
+      patches.forEach(pt => {
+        if (!pt || typeof pt.p !== 'string') return;
+        let f = null;
+        if (/search_model_queries$/.test(pt.p)) f = queriesFrom({ search_model_queries: pt.v });
+        else if (/search_queries$/.test(pt.p)) f = queriesFrom({ search_queries: pt.v });
+        if (f) { tap.captured++; stashQueries(cid, st.lastParent, st.lastMsg, f); }
+      });
+    };
+    const feed = (text, st) => {
+      st.buf += text;
+      let i;
+      while ((i = st.buf.indexOf('\n\n')) >= 0) {
+        const block = st.buf.slice(0, i); st.buf = st.buf.slice(i + 2);
+        const dm = block.match(/^data:\s?(.*)$/m); if (!dm) continue;
+        let v; try { v = JSON.parse(dm[1]); } catch (e) { continue; }
+        if (v && typeof v === 'object') { try { onEvent(v, st); } catch (e) {} }
+      }
+    };
+    window.fetch = async function (input, init) {
+      const res = await nativeFetch.apply(this, arguments);
+      try {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+        const ct = (res.headers && res.headers.get('content-type')) || '';
+        if (method === 'POST' && /\/backend-api\/(f\/)?conversation(\?|$)/.test(url) && /event-stream/.test(ct) && res.body) {
+          const pair = res.body.tee();
+          const st = { buf: '', cid: '', lastMsg: '', lastParent: '' };
+          tap.streams++;
+          (async () => {
+            const rd = pair[1].getReader(); const dec = new TextDecoder();
+            try { for (;;) { const r = await rd.read(); if (r.done) break; feed(dec.decode(r.value, { stream: true }), st); } } catch (e) {}
+          })();
+          return new Response(pair[0], { status: res.status, statusText: res.statusText, headers: res.headers });
+        }
+      } catch (e) {}
+      return res;
+    };
+  }
 
   const parseLine = (line, batch, prompt, turn) => {
     line = line.trim(); if (!line) return;
@@ -79,8 +177,29 @@
 
   const extract = (j) => {
     rows.length = 0; batches.length = 0; turns.length = 0;
-    meta.fetched = 0; meta.cited = 0; meta.redditFetched = 0; meta.redditCited = 0; meta.unknownTurns = 0; meta.hiddenQueries = 0; meta.promptList = [];
+    meta.fetched = 0; meta.cited = 0; meta.redditFetched = 0; meta.redditCited = 0; meta.unknownTurns = 0; meta.hiddenQueries = 0; meta.liveRounds = 0; meta.savedRounds = 0; meta.promptList = [];
     let prompt = '', batch = 0, turn = 0, cur = null;
+    const path = activePath(j);
+    // Queries for a search call live either in the chat (Work workspaces) or in this browser's live capture.
+    // Both are keyed by the call message they answer, with a fallback on the id of the message that carried them.
+    const liveQ = readQ()[j.conversation_id || meta.id] || {};
+    const savedQ = {};
+    path.forEach(n => {
+      const m = n.message; if (!m) return;
+      const f = queriesFrom(m.metadata); if (!f) return;
+      const parent = (m.metadata && m.metadata.parent_id) || n.parent || '';
+      if (parent) savedQ[parent] = f;
+      savedQ['@' + m.id] = f;
+    });
+    const findQ = (map, callId, idx) => {
+      if (map[callId]) return map[callId];
+      for (let k = idx + 1; k < path.length; k++) {
+        const nm = path[k].message; if (!nm || !nm.author) continue;
+        if (nm.author.role === 'user' || nm.recipient === 'web.run' || nm.recipient === 'web') break;
+        if (map['@' + nm.id]) return map['@' + nm.id];
+      }
+      return null;
+    };
     const bigToPos = {};   // long round id (from tool results and cite markers) -> position of the round inside its turn
     const addEntry = (b, e, pos) => {
       if (!e || !e.url) return;
@@ -89,7 +208,7 @@
       const rid = e.ref_id || {};
       b.entries.push({ url, raw: String(e.url), host: hostOf(e.url), key: b.turn + '|' + pos + '|' + rid.ref_type + '|' + rid.ref_index, cited: false });
     };
-    activePath(j).forEach(n => {
+    path.forEach((n, idx) => {
       const m = n.message; if (!m || !m.author) return;
       const role = m.author.role;
       const md = m.metadata || {};
@@ -107,9 +226,17 @@
         const before = rows.length;
         if (text) text.split(/\r?\n/).forEach(l => parseLine(l, batch, prompt, turn));
         if (rows.length === before) {
-          meta.hiddenQueries++;
-          rows.push({ n: rows.length + 1, batch, turn, type: 'web', query: HIDDEN_Q, days: '', domain: '', reddit: 'no',
-            location: '', prompt, results: '', cited: '', locked: '', batchResults: '', batchCited: '', batchDomains: '', sources: [] });
+          const saved = findQ(savedQ, m.id, idx), captured = saved ? null : findQ(liveQ, m.id, idx);
+          const f = saved || captured;
+          if (f) {
+            if (saved) meta.savedRounds++; else meta.liveRounds++;
+            f.q.forEach((q, i) => rows.push({ n: rows.length + 1, batch, turn, type: (f.t && f.t[i]) || 'web', query: q, days: '', domain: '',
+              reddit: /reddit/i.test(q) ? 'yes' : 'no', location: '', prompt, results: '', cited: '', locked: '', batchResults: '', batchCited: '', batchDomains: '', sources: [], qsrc: saved ? 'saved' : 'live' }));
+          } else {
+            meta.hiddenQueries++;
+            rows.push({ n: rows.length + 1, batch, turn, type: 'web', query: HIDDEN_Q, days: '', domain: '', reddit: 'no',
+              location: '', prompt, results: '', cited: '', locked: '', batchResults: '', batchCited: '', batchDomains: '', sources: [], qsrc: '' });
+          }
         }
         return;
       }
@@ -188,9 +315,11 @@
   // ---------- Exports ----------
   const csvCell = s => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
   const srcList = (r, onlyCited) => r.sources.filter(e => !onlyCited || e.cited).map(e => e.raw).join(' | ');
+  // Where a row's query came from: the chat itself (pre-September text format or a Work workspace), the live capture, or nowhere.
+  const qsrcOf = r => r.qsrc === 'live' ? 'captured live' : r.qsrc === 'saved' ? 'saved chat' : r.query === HIDDEN_Q ? 'not exposed' : 'saved chat';
   const toCSV = () => {
-    const head = ['n', 'batch', 'type', 'query', 'freshness_days', 'domain', 'results', 'cited', 'reddit', 'location', 'locked_host', 'round_results', 'round_cited', 'round_top_domains', 'sources', 'cited_sources', 'prompt', 'conversation_id', 'captured_at'];
-    return [head.join(',')].concat(view().map(r => [r.n, r.batch, r.type, r.query, r.days, r.domain, r.results, r.cited, r.reddit, r.location, r.locked, r.batchResults, r.batchCited, r.batchDomains, srcList(r, false), srcList(r, true), r.prompt, meta.id, meta.at].map(csvCell).join(','))).join('\n');
+    const head = ['n', 'batch', 'type', 'query', 'query_source', 'freshness_days', 'domain', 'results', 'cited', 'reddit', 'location', 'locked_host', 'round_results', 'round_cited', 'round_top_domains', 'sources', 'cited_sources', 'prompt', 'conversation_id', 'captured_at'];
+    return [head.join(',')].concat(view().map(r => [r.n, r.batch, r.type, r.query, qsrcOf(r), r.days, r.domain, r.results, r.cited, r.reddit, r.location, r.locked, r.batchResults, r.batchCited, r.batchDomains, srcList(r, false), srcList(r, true), r.prompt, meta.id, meta.at].map(csvCell).join(','))).join('\n');
   };
   // One row per search line, followed by one row per page it got back (row_kind = search / source). Filter on row_kind in a spreadsheet.
   const toSourcesCSV = () => {
@@ -217,7 +346,7 @@
     ['n', 'The line number, in the order ChatGPT ran the searches. 1 is the first search of the chat.', 'n = 43 means it was the 43rd search in this chat.'],
     ['batch', 'ChatGPT searches in rounds. It sends a few searches together, reads what came back, then may send another round. batch is the round number.', 'All lines with batch = 2 were sent together, after ChatGPT had read the results of batch 1.'],
     ['type', 'What kind of search it was. See the Types tab for the full list.', 'fast = a normal web search. business = a places search. image = a picture search. slow = a deeper web search.'],
-    ['query', 'The exact words ChatGPT sent to search, including any site: and quotes. This is the fan-out term.' + ' From September 2026 ChatGPT stopped sending this to the browser, so on new chats the line reads "query not exposed by ChatGPT" and the pages and citations are still shown. Chats saved before the change still have it.', 'query = "Shrimp Shack Camden" reviews portion sauce birthday'],
+    ['query', 'The exact words ChatGPT sent to search, including any site: and quotes. This is the fan-out term.' + ' From September 2026 ChatGPT no longer saves it with the chat. It still streams the first batch of queries to the browser while it answers, so click the bookmark before you send a prompt and they are captured and kept for that chat. Work workspaces keep the queries in the saved chat. A round with no query from either source reads "query not exposed by ChatGPT" and still shows its pages and citations.', 'query = "Shrimp Shack Camden" reviews portion sauce birthday'],
     ['days', 'How recent the pages had to be, in days. 30 = last month. 365 = last year. 3650 = last ten years. Empty = no limit.' + ' Gone from new chats since September 2026, along with the query text, so this column is empty on them.', 'days = 365 on a Reddit search means ChatGPT only wanted Reddit posts from the last year.'],
     ['domain', 'When filled, ChatGPT only searched that one website. Empty = the whole web. A site: inside the query does the same job.' + ' Gone from new chats since September 2026, along with the query text, so this column is empty on them.', 'domain = reddit.com means only Reddit was searched. site:linkedin.com/jobs in the query means only LinkedIn jobs pages.'],
     ['results', 'How many pages came back. For a line with a domain or a site:, it is the count from that website in that round. For an open search, it is the count for the whole round. ChatGPT records results per round, not per query, so lines in the same round that search the same place show the same number. Empty for business and image lines, whose results are not exposed.', 'results = 12 with domain = sexyfish.com means 12 pages from sexyfish.com came back. results = 0 with domain = reddit.com means the Reddit search returned nothing, so Reddit could not be cited from it.'],
@@ -412,8 +541,11 @@
     body.innerHTML = '';
     const red = rows.filter(r => r.reddit === 'yes').length;
     const nb = rows.length ? rows[rows.length - 1].batch : 0;
-    const hidden = meta.hiddenQueries ? ' ChatGPT is no longer exposing the query text for ' + meta.hiddenQueries + ' of these round(s), so the pages and citations are shown and the query, freshness window and site limit are not.' : '';
-    status.textContent = rows.length + ' search line(s) in ' + nb + ' round(s) across ' + meta.prompts + ' prompt(s). ' + red + ' mention Reddit.' + hidden + stateNote();
+    const got = (meta.liveRounds ? ' Queries for ' + meta.liveRounds + ' round(s) were captured live while ChatGPT answered and are kept for this chat in this browser.' : '')
+      + (meta.savedRounds ? ' Queries for ' + meta.savedRounds + ' round(s) come from the saved chat.' : '');
+    const hidden = meta.hiddenQueries ? ' ChatGPT no longer saves the query text with the chat and only streams it while answering, so ' + meta.hiddenQueries + ' round(s) show pages and citations without the query, freshness window or site limit.' + (meta.liveRounds ? '' : ' Click the bookmark before you send a prompt and the queries are captured.') : '';
+    const hidden2 = got + hidden;
+    status.textContent = rows.length + ' search line(s) in ' + nb + ' round(s) across ' + meta.prompts + ' prompt(s). ' + red + ' mention Reddit.' + hidden2 + stateNote();
     headline.textContent = rows.length ? 'Fetched ' + meta.fetched + ' page(s), ' + meta.cited + ' shown as sources in the answers. Reddit: ' + meta.redditFetched + ' fetched, ' + meta.redditCited + ' cited.' + (meta.unknownTurns ? ' (' + meta.unknownTurns + ' prompt(s) have no finished answer yet, so their cited counts are left empty.)' : '') : '';
     promptLine.textContent = promptSummary();
     bE.textContent = expanded.size ? 'Collapse all' : 'Expand all';
@@ -443,6 +575,7 @@
         const td = document.createElement('td'); td.textContent = cell(r, k);
         td.style.cssText = 'border-bottom:1px solid rgb(42,42,42);padding:4px 6px;vertical-align:top;' + (k === 'query' ? 'word-break:break-word' : 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis') + (k === 'cited' && r.cited !== '' && r.cited > 0 ? ';color:rgb(120,220,140);font-weight:600' : '');
         if (k === 'domain' && r.domain) td.title = r.domain;
+        if (k === 'query') td.title = r.qsrc === 'live' ? 'Captured live while ChatGPT answered, kept for this chat in this browser' : r.qsrc === 'saved' ? 'From the saved chat' : r.query === HIDDEN_Q ? 'ChatGPT did not send this query to the browser' : '';
         row.appendChild(td);
       });
       t.appendChild(row);
@@ -549,7 +682,9 @@
   };
   bL.onclick = () => { live = !live; bL.textContent = live ? 'Live: on' : 'Live: off'; if (live) { settled = false; } render(); };
   bR.onclick = () => { if (!chatId) return; settled = false; backoffUntil = 0; load(true); };
-  const closePanel = () => { closed = true; clearTimeout(timer); removeEventListener('resize', fitPanel); document.removeEventListener('keydown', onKey, true); box.remove(); };
+  const closePanel = () => { closed = true; clearTimeout(timer); removeEventListener('resize', fitPanel); document.removeEventListener('keydown', onKey, true); if (window.__foTap) window.__foTap.onCapture = null; box.remove(); };
+  // A live capture for this chat wakes the reader so the queries show as soon as the chat has the call they belong to.
+  if (window.__foTap) window.__foTap.onCapture = (cid) => { if (closed) return; if (!chatId || cid === chatId) { settled = false; lastSig = ''; backoffUntil = 0; } };
   bX.onclick = closePanel;
   // Escape is the guaranteed way out, in case the page's own layout ever hides the Close button.
   const onKey = (e) => {
