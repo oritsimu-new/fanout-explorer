@@ -667,7 +667,7 @@
     const id = idFromUrl();
     if (id !== chatId) {
       chatId = id; lastSig = ''; settled = false; graceUntil = 0; fromCopy = false; rows.length = 0; expanded.clear(); body.innerHTML = ''; headline.textContent = ''; promptLine.textContent = '';
-      if (!chatId) status.textContent = 'Waiting for a chat. Send your prompt here and the searches will appear as ChatGPT runs them.';
+      if (!chatId) status.textContent = (window.__foTap ? 'Query capture is armed. ' : '') + 'Waiting for a chat. Send your prompt here and the searches, with their queries, will appear as ChatGPT runs them.';
       else if (loadCopy(chatId)) { fromCopy = true; settled = meta.unknownTurns === 0 && !streaming(); render(); }
       else status.textContent = 'Reading conversation ' + chatId + ' ...';
     }
