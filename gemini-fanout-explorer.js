@@ -5,7 +5,7 @@
   //
   // Gemini exposes less than ChatGPT or Claude: it shows the sources it cited, not the wider pool it read and passed
   // over, and its search queries live only in the stored conversation, never on screen. This surfaces both.
-  const BUILD = '2026-09-18.3';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-22';   // shown in the panel so a stale install can be spotted at a glance
   const queries = [];   // { n, turn, query, prompt, reddit }
   const sources = [];   // { n, turn, url, raw, host, title, snippet, supports, prompt, reddit }
   const meta = { id: '', at: '', prompts: 0, promptList: [], model: '', queryCount: 0, sourceCount: 0, domainCount: 0, redditQueries: 0, redditSources: 0 };
@@ -409,7 +409,7 @@
     }
     const now = Date.now(), busy = streaming();
     if (busy) settled = false;
-    const wanted = chatId && live && !settled && now >= backoffUntil;
+    const wanted = chatId && live && !settled && now >= backoffUntil && document.visibilityState !== 'hidden';
     if (wanted) await load(false);
     else if (chatId && live && now < backoffUntil && !inFlight) status.textContent = status.textContent.replace(/Next try in \d+s\./, 'Next try in ' + Math.ceil((backoffUntil - now) / 1000) + 's.');
     timer = setTimeout(tick, busy ? 3500 : 2500);

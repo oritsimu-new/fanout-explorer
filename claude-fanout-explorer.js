@@ -2,7 +2,7 @@
   // Claude Fanout Explorer, a bookmarklet for claude.ai. Reads the chat you have open (live while Claude answers, or a saved chat) and lists every
   // web search Claude ran, every page it opened, the pages each search got back, and which of those were cited.
   // Read-only: it sends no prompts and changes nothing.
-  const BUILD = '2026-09-18.3';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-22';   // shown in the panel so a stale install can be spotted at a glance
   const rows = [];
   const turns = [];     // turns[t] = { prompt, cited: Set, hasAnswer }
   const meta = { id: '', at: '', prompts: 0, promptList: [], fetched: 0, cited: 0, redditFetched: 0, redditCited: 0, unknownTurns: 0 };
@@ -418,11 +418,11 @@
         lastSig = sig; fromCopy = false;
         meta.id = chatId; meta.at = new Date().toISOString();
         extract(JSON.parse(txt));
-        settled = !streaming() && Date.now() > graceUntil && meta.unknownTurns === 0;
+        settled = !streaming() && Date.now() > graceUntil;
         render(); saveCopy();
         if (!rows.length) status.textContent = 'No searches yet. If the answer is finished and this stays empty, Claude answered without searching the web.' + stateNote();
       } else {
-        settled = !streaming() && Date.now() > graceUntil && meta.unknownTurns === 0;
+        settled = !streaming() && Date.now() > graceUntil;
         if (rows.length) status.textContent = status.textContent.replace(/ (Live|Saved copy).*$/, stateNote());
       }
     } catch (e) {
@@ -445,10 +445,10 @@
     if (busy) settled = false;
     if (wasStreaming && !busy) graceUntil = now + 15000;
     wasStreaming = busy;
-    const wanted = chatId && live && !settled && now >= backoffUntil;
+    const wanted = chatId && live && !settled && now >= backoffUntil && document.visibilityState !== 'hidden';
     if (wanted) await load(false);
     else if (chatId && live && now < backoffUntil && !inFlight) status.textContent = status.textContent.replace(/Next try in \d+s\./, 'Next try in ' + Math.ceil((backoffUntil - now) / 1000) + 's.');
-    timer = setTimeout(tick, busy || now < graceUntil ? 4000 : 2000);
+    timer = setTimeout(tick, busy || now < graceUntil ? 4000 : 3000);
   };
   bL.onclick = () => { live = !live; bL.textContent = live ? 'Live: on' : 'Live: off'; if (live) { settled = false; } render(); };
   bR.onclick = () => { if (!chatId) return; settled = false; backoffUntil = 0; load(true); };

@@ -15,7 +15,7 @@
   const HIDDEN_Q = 'query not exposed by ChatGPT';
   const HIDDEN_FIRST = 'query not captured: the bookmark was not running when this prompt was sent';
   const HIDDEN_LATER = 'follow-up batch: ChatGPT does not send these queries';
-  const BUILD = '2026-09-22';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-22.2';   // shown in the panel so a stale install can be spotted at a glance
   const NO_RESULTS = ['business', 'image'];   // their results are not exposed in the payload
 
   const rows = [];
@@ -684,7 +684,9 @@
 
   // ---------- Live mode: watch the chat in the URL and re-read it only while ChatGPT is answering ----------
   // A finished chat is read once (or not at all when a saved copy exists). Polling only happens while the answer is being
-  // written, plus a short grace period after it ends. 429 answers from ChatGPT trigger a growing pause between tries.
+  // written, plus a short grace period after it ends, and never from a background tab. Turns with no stored answer are
+  // history and do not keep the reader polling: the rate limit is shared with ChatGPT's own page, so a reader that keeps
+  // re-reading a long chat every few seconds makes ChatGPT itself answer 429 when you move between chats. 429 answers from ChatGPT trigger a growing pause between tries.
   let chatId = null, token = '', inFlight = false, lastSig = '', timer = null, live = true, closed = false;
   let settled = false, wasStreaming = false, graceUntil = 0, backoffUntil = 0, backoffMs = 0, fromCopy = false;
   const idFromUrl = () => { const m = location.pathname.match(/\/c\/([0-9a-fA-F-]{16,})/); return m ? m[1] : ''; };
@@ -715,11 +717,11 @@
         lastSig = sig; fromCopy = false;
         meta.id = chatId; meta.at = new Date().toISOString();
         extract(JSON.parse(txt));
-        settled = !streaming() && Date.now() > graceUntil && meta.unknownTurns === 0;
+        settled = !streaming() && Date.now() > graceUntil;
         render(); saveCopy();
         if (!rows.length) status.textContent = 'No search lines yet. If the answer is finished and this stays empty, it never searched the web, or the format moved again.' + stateNote();
       } else {
-        settled = !streaming() && Date.now() > graceUntil && meta.unknownTurns === 0;
+        settled = !streaming() && Date.now() > graceUntil;
         if (rows.length) status.textContent = status.textContent.replace(/ (Live|Saved copy).*$/, stateNote());
       }
     } catch (e) {
@@ -733,23 +735,23 @@
     if (id !== chatId) {
       chatId = id; lastSig = ''; settled = false; graceUntil = 0; fromCopy = false; rows.length = 0; expanded.clear(); body.innerHTML = ''; headline.textContent = ''; promptLine.textContent = '';
       if (!chatId) status.textContent = (window.__foTap ? 'Query capture is armed. ' : '') + 'Waiting for a chat. Send your prompt here and the searches, with their queries, will appear as ChatGPT runs them.';
-      else if (loadCopy(chatId)) { fromCopy = true; settled = meta.unknownTurns === 0 && !streaming(); render(); }
+      else if (loadCopy(chatId)) { fromCopy = true; settled = !streaming(); render(); }
       else status.textContent = 'Reading conversation ' + chatId + ' ...';
     }
     const now = Date.now(), busy = streaming();
     if (busy) settled = false;
     if (wasStreaming && !busy) graceUntil = now + 15000;   // the answer just finished: read a couple more times to pick up the final pool and citations
     wasStreaming = busy;
-    const wanted = chatId && live && !settled && now >= backoffUntil;
+    const wanted = chatId && live && !settled && now >= backoffUntil && document.visibilityState !== 'hidden';
     if (wanted) await load(false);
     else if (chatId && live && now < backoffUntil && !inFlight) status.textContent = status.textContent.replace(/Next try in \d+s\./, 'Next try in ' + Math.ceil((backoffUntil - now) / 1000) + 's.');
-    timer = setTimeout(tick, busy || now < graceUntil ? 4000 : 2000);
+    timer = setTimeout(tick, busy || now < graceUntil ? 4000 : 3000);
   };
   bL.onclick = () => { live = !live; bL.textContent = live ? 'Live: on' : 'Live: off'; if (live) { settled = false; } render(); };
   bR.onclick = () => { if (!chatId) return; settled = false; backoffUntil = 0; load(true); };
   const closePanel = () => { closed = true; clearTimeout(timer); removeEventListener('resize', fitPanel); document.removeEventListener('keydown', onKey, true); if (window.__foTap) window.__foTap.onCapture = null; box.remove(); };
   // A live capture for this chat wakes the reader so the queries show as soon as the chat has the call they belong to.
-  if (window.__foTap) window.__foTap.onCapture = (cid) => { if (closed) return; if (!chatId || cid === chatId) { settled = false; lastSig = ''; backoffUntil = 0; } };
+  if (window.__foTap) window.__foTap.onCapture = (cid) => { if (closed) return; if (!chatId || cid === chatId) { settled = false; lastSig = ''; } };
   bX.onclick = closePanel;
   // Escape is the guaranteed way out, in case the page's own layout ever hides the Close button.
   const onKey = (e) => {
