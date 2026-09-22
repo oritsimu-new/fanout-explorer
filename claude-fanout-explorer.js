@@ -2,7 +2,7 @@
   // Claude Fanout Explorer, a bookmarklet for claude.ai. Reads the chat you have open (live while Claude answers, or a saved chat) and lists every
   // web search Claude ran, every page it opened, the pages each search got back, and which of those were cited.
   // Read-only: it sends no prompts and changes nothing.
-  const BUILD = '2026-09-22';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-22.1';   // shown in the panel so a stale install can be spotted at a glance
   const rows = [];
   const turns = [];     // turns[t] = { prompt, cited: Set, hasAnswer }
   const meta = { id: '', at: '', prompts: 0, promptList: [], fetched: 0, cited: 0, redditFetched: 0, redditCited: 0, unknownTurns: 0 };
@@ -157,7 +157,7 @@
   const TYPES = [
     ['web_search', 'search, listed', 'A web search. One query per call. Claude reads the results, then may search again with a refined query. No freshness window or domain lock is exposed; site: goes inside the query when Claude wants one.', '{ "query": "..." }', 'Avios eStore Apple iPhone 17 pre-order earn Avios'],
     ['web_fetch', 'fetch, listed', 'Claude opens one page in full to read it, usually a result from an earlier search or a link you gave it.', '{ "url": "https://..." }', 'https://www.iagloyalty.com/news-insights/avios-shop-apple-products'],
-    ['results', 'for reference', 'Each search result is stored as a knowledge item with url, title and site name. Results stay attached to the query that produced them, which is why results and cited are exact per line here, unlike ChatGPT where they are per round.', '', ''],
+    ['results', 'for reference', 'Each search result is stored as a knowledge item with url, title and site name. Results stay attached to the query that produced them, which is why results and cited are exact per line here, unlike ChatGPT where they are per batch.', '', ''],
     ['citations', 'for reference', 'Claude cites inside the text: Each citation covers a span of the answer and carries the source url and title. A page counts as cited when any citation in the same turn points at its url.', '', ''],
     ['other tools', 'ignored', 'memory_read, message_compose, artifacts, code execution and similar tools are not searches and are left out.', '', '']
   ];

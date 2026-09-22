@@ -15,7 +15,7 @@
   const HIDDEN_Q = 'query not exposed by ChatGPT';
   const HIDDEN_FIRST = 'query not captured: the bookmark was not running when this prompt was sent';
   const HIDDEN_LATER = 'follow-up batch: ChatGPT does not send these queries';
-  const BUILD = '2026-09-22.4';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-22.5';   // shown in the panel so a stale install can be spotted at a glance
   const NO_RESULTS = ['business', 'image'];   // their results are not exposed in the payload
 
   const rows = [];
@@ -343,7 +343,7 @@
   // Where a row's query came from: the chat itself (pre-September text format or a Work workspace), the live capture, or nowhere.
   const qsrcOf = r => r.qsrc === 'live' ? 'captured live' : r.qsrc === 'saved' ? 'saved chat' : r.hidden ? 'not exposed' : 'saved chat';
   const toCSV = () => {
-    const head = ['n', 'batch', 'type', 'query', 'query_source', 'freshness_days', 'domain', 'results', 'cited', 'dated_pages', 'median_fetched_age_days', 'median_cited_age_days', 'pages_under_30_days', 'batch_note', 'reddit', 'location', 'locked_host', 'round_results', 'round_cited', 'round_top_domains', 'sources', 'cited_sources', 'prompt', 'conversation_id', 'captured_at'];
+    const head = ['n', 'batch', 'type', 'query', 'query_source', 'freshness_days', 'domain', 'results', 'cited', 'dated_pages', 'median_fetched_age_days', 'median_cited_age_days', 'pages_under_30_days', 'batch_note', 'reddit', 'location', 'locked_host', 'batch_results', 'batch_cited', 'batch_top_domains', 'sources', 'cited_sources', 'prompt', 'conversation_id', 'captured_at'];
     const agesOf = r => r.sources.filter(e => e.date).map(e => ageOf(e.date));
     return [head.join(',')].concat(view().map(r => { const ag = agesOf(r); return [r.n, r.batch, r.type, r.query, qsrcOf(r), r.days, r.domain, r.results, r.cited, ag.length, ag.length ? median(ag) : '', r.citedAge, ag.filter(a => a <= 30).length, r.note || '', r.reddit, r.location, r.locked, r.batchResults, r.batchCited, r.batchDomains, srcList(r, false), srcList(r, true), r.prompt, meta.id, meta.at].map(csvCell).join(','); })).join('\n');
   };
@@ -371,12 +371,12 @@
   const INDEX = [
     ['prompt (above the table)', 'The message you sent that started the searches. With several prompts in one chat, all of them are listed in order.', ''],
     ['n', 'The line number, in the order ChatGPT ran the searches. 1 is the first search of the chat.', 'n = 43 means it was the 43rd search in this chat.'],
-    ['batch', 'ChatGPT searches in rounds. It sends a few searches together, reads what came back, then may send another round. batch is the round number.', 'All lines with batch = 2 were sent together, after ChatGPT had read the results of batch 1.'],
+    ['batch', 'ChatGPT searches in batches. It sends a few searches together, reads what came back, then may send another batch. batch is the position of that batch in the answer: 1 for the first, 2 for the next.', 'All lines with batch = 2 were sent together, after ChatGPT had read the results of batch 1.'],
     ['type', 'What kind of search it was. See the Types tab for the full list.', 'fast = a normal web search. business = a places search. image = a picture search. slow = a deeper web search.'],
-    ['query', 'The exact words ChatGPT sent to search, including any site: and quotes. This is the fan-out term.' + ' From September 2026 ChatGPT no longer saves it with the chat. It still streams the first batch of queries to the browser while it answers, so click the bookmark before you send a prompt and they are captured and kept for that chat. Work workspaces keep the queries in the saved chat. A round with no query from either source reads "query not exposed by ChatGPT" and still shows its pages and citations.', 'query = "Shrimp Shack Camden" reviews portion sauce birthday'],
+    ['query', 'The exact words ChatGPT sent to search, including any site: and quotes. This is the fan-out term.' + ' From September 2026 ChatGPT no longer saves it with the chat. It still streams the first batch of queries to the browser while it answers, so click the bookmark before you send a prompt and they are captured and kept for that chat. Work workspaces keep the queries in the saved chat. A batch with no query from either source says why in the query cell (the bookmark was not running when the prompt was sent, or it is a follow-up batch, which ChatGPT never streams) and still shows its pages and citations.', 'query = "Shrimp Shack Camden" reviews portion sauce birthday'],
     ['days', 'How recent the pages had to be, in days, when ChatGPT still sent it. 30 = last month. 365 = last year. 3650 = last ten years. ChatGPT stopped sending this in September 2026, so the column only appears on chats from before then and stays hidden when every line is empty. For newer chats, fetched age and cited age show how old the pages actually were.', 'days = 30 on a chat from August 2026'],
     ['domain', 'Only on chats from before September 2026, when ChatGPT still sent it, and hidden when every line is empty. When filled, ChatGPT only searched that one website. Empty = the whole web. A site: inside the query does the same job.' + ' Gone from new chats since September 2026, along with the query text, so this column is empty on them.', 'domain = reddit.com means only Reddit was searched. site:linkedin.com/jobs in the query means only LinkedIn jobs pages.'],
-    ['results', 'How many pages came back. For a line with a domain or a site:, it is the count from that website in that round. For an open search, it is the count for the whole round. ChatGPT records results per round, not per query, so lines in the same round that search the same place show the same number. Empty for business and image lines, whose results are not exposed.', 'results = 12 with domain = sexyfish.com means 12 pages from sexyfish.com came back. results = 0 with domain = reddit.com means the Reddit search returned nothing, so Reddit could not be cited from it.'],
+    ['results', 'How many pages came back. For a line with a domain or a site:, it is the count from that website in that batch. For an open search, it is the count for the whole batch. ChatGPT records results per batch, not per query, so lines in the same batch that search the same place show the same number. Empty for business and image lines, whose results are not exposed.', 'results = 12 with domain = sexyfish.com means 12 pages from sexyfish.com came back. results = 0 with domain = reddit.com means the Reddit search returned nothing, so Reddit could not be cited from it.'],
     ['cited', 'How many of those pages were shown as a source in the answer, either as a citation chip in the text or in the Sources list at the end. Empty while the answer is still being written, or when the answer for that prompt is not stored in the chat.', 'results = 11, cited = 3 means 11 pages came back and 3 were shown as sources. results = 84, cited = 0 means ChatGPT read 84 pages and credited none of them.'],
     ['+ (first column)', 'Opens the line. First every page that was shown as a source in the answer, then the pages that were not, grouped by website: a website with several pages gets its own group with its full record in brackets, and the websites that returned a single page sit in one list. The age next to a page is its publication date read against today. Hover a page for its title and date. ChatGPT returns one pool of pages for the whole batch, so every query in a batch opens the same list.', ''],
     ['Show what ChatGPT read', 'A switch inside an opened line. On, each page shows the snippet ChatGPT was given for it, which is what it judged the page on before deciding whether to cite it, and the batch shows ChatGPT\'s own working note, the short thinking summary it wrote before running that batch, when the chat has one. Off by default so the list stays readable. Both are in the sources CSV as source_snippet and batch_note.', ''],
@@ -388,7 +388,7 @@
     ['reddit (exports only)', 'yes if the query or the domain mentions Reddit, otherwise no.', ''],
     ['location (exports only)', 'For business lines, the place ChatGPT searched around.', 'location = West Finchley, London, UK'],
     ['locked_host (CSV only)', 'The website a line was limited to, taken from the domain column or the site: in the query.', 'locked_host = linkedin.com'],
-    ['round_results, round_cited, round_top_domains (CSV only)', 'For the whole round the line belongs to: How many pages came back, how many were shown as sources, and the three websites with the most pages.', 'round_top_domains = opentable.co.uk 4, wanderlog.com 1, tripadvisor.co.uk 1'],
+    ['batch_results, batch_cited, batch_top_domains (CSV only)', 'For the whole batch the line belongs to: How many pages came back, how many were shown as sources, and the three websites with the most pages.', 'batch_top_domains = opentable.co.uk 4, wanderlog.com 1, tripadvisor.co.uk 1'],
     ['sources, cited_sources (CSV only)', 'The pages behind the + for that line, and the ones that were cited, as lists separated by |.', ''],
     ['conversation_id, captured_at (exports only)', 'The chat ID from the URL, and when you exported.', ''],
     ['Copy queries only', 'Copies the query column, one per line, ready for a spreadsheet or a keyword tool.', ''],
@@ -398,7 +398,7 @@
     ['Sorting', 'Click a column header to sort by it, click again to reverse. Empty cells always go last. Copies and the CSV follow the sort you see. Sort by n to get back to the original order.', ''],
     ['Saved copies', 'Every chat the panel reads is kept in this browser. Reopening a chat shows the saved copy at once, without asking ChatGPT again. The newest 30 chats are kept. Refresh re-reads the live chat.', 'Status line: Saved copy from 06/09/2026 11:20. Refresh re-reads it.'],
     ['429 / rate limiting', 'If ChatGPT refuses reads (error 429), the panel keeps showing what it has and waits before trying again, a minute at first, longer if it keeps happening. Live reads only happen while an answer is being written, so a finished chat costs one read, or none when a saved copy exists.', ''],
-    ['Live: on / off', 'While on, the panel re-reads the chat every few seconds while ChatGPT is answering, and new lines appear as each round of searching finishes. Once the answer is done it stops reading until you send another prompt. Open it on a new chat, send your prompt, and watch it fill. Turn it off to stop all reads. Refresh re-reads once.', 'Open a new chat, click the bookmark, type "best AI live chat tools for a small Shopify store", send, and the rounds appear one by one.']
+    ['Live: on / off', 'While on, the panel re-reads the chat every few seconds while ChatGPT is answering, and new lines appear as each batch of searching finishes. Once the answer is done it stops reading until you send another prompt. Open it on a new chat, send your prompt, and watch it fill. Turn it off to stop all reads. Refresh re-reads once.', 'Open a new chat, click the bookmark, type "best AI live chat tools for a small Shopify store", send, and the batches appear one by one.']
   ];
 
   // ---------- Types tab: every line type seen in ChatGPT's web.run calls ----------
@@ -412,7 +412,7 @@
     ['open', 'action, ignored', 'Opens one of the results that came back, by its reference number, to read the page.', 'open|turnXsearchN', 'open|turn447052search12'],
     ['find', 'action, ignored', 'Finds text inside an opened page.', 'find|turnXsearchN|text', 'find|turn447052search12|Badeparadies'],
     ['click', 'action, ignored', 'Follows a link on an opened page.', 'click|turnXsearchN|link number', 'click|turn878257search1|0'],
-    ['length', 'setting, ignored', 'A hint for how long the answer should be. Always the last line of a round.', 'length|short  or  length|medium', 'length|medium'],
+    ['length', 'setting, ignored', 'A hint for how long the answer should be. Always the last line of a batch.', 'length|short  or  length|medium', 'length|medium'],
     ['Result types', 'for reference', 'Each page that comes back is tagged with where it came from: search (web), news, reddit (a separate Reddit source), business (places), image, view (a page ChatGPT opened). Reddit pages carrying their own tag is why Reddit can be fetched heavily and still cited rarely: it is a separate pool.', '', '']
   ];
 
@@ -678,11 +678,11 @@
     body.innerHTML = '';
     const red = rows.filter(r => r.reddit === 'yes').length;
     const nb = rows.length ? rows[rows.length - 1].batch : 0;
-    const got = (meta.liveRounds ? ' Queries for ' + meta.liveRounds + ' round(s) were captured live while ChatGPT answered and are kept for this chat in this browser.' : '')
-      + (meta.savedRounds ? ' Queries for ' + meta.savedRounds + ' round(s) come from the saved chat.' : '');
-    const hidden = meta.hiddenQueries ? ' ChatGPT no longer saves the query text with the chat and only streams it while answering, so ' + meta.hiddenQueries + ' round(s) show pages and citations without the query, freshness window or site limit.' + (meta.liveRounds ? '' : ' Click the bookmark before you send a prompt and the queries are captured.') : '';
+    const got = (meta.liveRounds ? ' Queries for ' + meta.liveRounds + ' batch(es) were captured live while ChatGPT answered and are kept for this chat in this browser.' : '')
+      + (meta.savedRounds ? ' Queries for ' + meta.savedRounds + ' batch(es) come from the saved chat.' : '');
+    const hidden = meta.hiddenQueries ? ' ChatGPT no longer saves the query text with the chat and only streams it while answering, so ' + meta.hiddenQueries + ' batch(es) show pages and citations without the query, freshness window or site limit.' + (meta.liveRounds ? '' : ' Click the bookmark before you send a prompt and the queries are captured.') : '';
     const hidden2 = got + hidden;
-    status.textContent = rows.length + ' search line(s) in ' + nb + ' round(s) across ' + meta.prompts + ' prompt(s). ' + red + ' mention Reddit.' + hidden2 + stateNote();
+    status.textContent = rows.length + ' search line(s) in ' + nb + ' batch(es) across ' + meta.prompts + ' prompt(s). ' + red + ' mention Reddit.' + hidden2 + stateNote();
     headline.textContent = rows.length ? 'Fetched ' + meta.fetched + ' page(s), ' + meta.cited + ' shown as sources in the answers. Reddit: ' + meta.redditFetched + ' fetched, ' + meta.redditCited + ' cited.' + (meta.unknownTurns ? ' (' + meta.unknownTurns + ' prompt(s) have no finished answer yet, so their cited counts are left empty.)' : '') : '';
     promptLine.textContent = promptSummary();
     brandsLine.textContent = brandsSearched();
