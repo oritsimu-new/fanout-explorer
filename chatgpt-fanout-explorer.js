@@ -15,7 +15,7 @@
   const HIDDEN_Q = 'query not exposed by ChatGPT';
   const HIDDEN_FIRST = 'query not captured: the bookmark was not running when this prompt was sent';
   const HIDDEN_LATER = 'follow-up batch: ChatGPT does not send these queries';
-  const BUILD = '2026-09-22.5';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-22.6';   // shown in the panel so a stale install can be spotted at a glance
   const NO_RESULTS = ['business', 'image'];   // their results are not exposed in the payload
 
   const rows = [];
@@ -207,11 +207,16 @@
     const addEntry = (b, e, pos) => {
       if (!e || !e.url) return;
       const url = normUrl(e.url);
-      if (b.seen.has(url)) return; b.seen.add(url);
+      const title = typeof e.title === 'string' ? e.title.slice(0, 160) : '', date = typeof e.pub_date === 'number' && e.pub_date > 0 ? e.pub_date : 0,
+        snippet = typeof e.snippet === 'string' ? e.snippet.replace(/\s+/g, ' ').trim().slice(0, 240) : '';
+      const prev = b.seen.get(url);
+      if (prev) { // ChatGPT lists a page more than once, and the first listing often has no snippet: keep one entry, fill in what is missing
+        if (!prev.title && title) prev.title = title; if (!prev.date && date) prev.date = date; if (!prev.snippet && snippet) prev.snippet = snippet;
+        return;
+      }
       const rid = e.ref_id || {};
-      b.entries.push({ url, raw: String(e.url), host: hostOf(e.url), key: b.turn + '|' + pos + '|' + rid.ref_type + '|' + rid.ref_index, cited: false,
-        title: typeof e.title === 'string' ? e.title.slice(0, 160) : '', date: typeof e.pub_date === 'number' && e.pub_date > 0 ? e.pub_date : 0,
-        snippet: typeof e.snippet === 'string' ? e.snippet.replace(/\s+/g, ' ').trim().slice(0, 240) : '' });
+      const ent = { url, raw: String(e.url), host: hostOf(e.url), key: b.turn + '|' + pos + '|' + rid.ref_type + '|' + rid.ref_index, cited: false, title, date, snippet };
+      b.entries.push(ent); b.seen.set(url, ent);
     };
     path.forEach((n, idx) => {
       const m = n.message; if (!m || !m.author) return;
@@ -239,7 +244,7 @@
       }
       if ((m.recipient === 'web.run' || m.recipient === 'web') && m.content) {
         const text = typeof m.content.text === 'string' ? m.content.text : (m.content.parts || []).filter(x => typeof x === 'string').join('\n');
-        batch++; cur = { turn, pos: T.batches.length, entries: [], seen: new Set(), note: pendingNote.slice(0, 700) }; pendingNote = ''; batches[batch] = cur; T.batches.push(batch);
+        batch++; cur = { turn, pos: T.batches.length, entries: [], seen: new Map(), note: pendingNote.slice(0, 700) }; pendingNote = ''; batches[batch] = cur; T.batches.push(batch);
         const before = rows.length;
         if (text) text.split(/\r?\n/).forEach(l => parseLine(l, batch, prompt, turn));
         if (rows.length === before) {
@@ -382,8 +387,8 @@
     ['Show what ChatGPT read', 'A switch inside an opened line. On, each page shows the snippet ChatGPT was given for it, which is what it judged the page on before deciding whether to cite it, and the batch shows ChatGPT\'s own working note, the short thinking summary it wrote before running that batch, when the chat has one. Off by default so the list stays readable. Both are in the sources CSV as source_snippet and batch_note.', ''],
     ['Brands it searched (under the prompt)', 'The brands ChatGPT chose to check, read from the query text: a name in a query that matches one of the websites that came back, so words like SEO or AI never qualify and a brand it named but got no page from is not listed. The first batch of queries is written before a single result arrives, so these names come from what the model already holds: its training data, and your memory and custom instructions if they are on. A brand the model does not know cannot be in that first batch and can only enter through a generic query and whatever page answers it. Blocking the training crawlers on your own site makes that a little more likely, but most of what a model knows about a brand comes from other people\'s pages, so a well-discussed brand that blocks them is still named. Turn memory off when you measure, or your own history shapes the list.', 'Brands it searched: Semrush, Ahrefs, Sistrix, Sitebulb, Screaming Frog, seoClarity'],
     ['headline (above the table)', 'Fetched = pages that came back across the whole chat, each counted once. Shown as sources = how many of those appeared in an answer. Reddit = the same two numbers for reddit.com only.', 'Fetched 204 pages, 19 shown as sources. Reddit: 57 fetched, 5 cited.'],
-    ['fetched age', 'How old the pages that came back are. ChatGPT records a publication date for many of the pages it fetches, roughly half in practice. Take those dated pages, work out each one\'s age from its date to today and sort them: the column shows the middle one, the median. 2mo means half the dated pages are two months old or newer. It is the median rather than the average so one ten-year-old page cannot drag the number. Hover the cell for the newest, the oldest and how many are from the last 30 days. Inside the line each dated page shows its own age. The days column was what ChatGPT asked for, fetched age is what it got. Empty when none of the pages carry a date.', 'fetched age = 2mo. Hover: 26 of 58 pages carry a date, newest 6d, oldest 8.7y, 5 from the last 30 days'],
-    ['cited age', 'The same median, taken over the pages from this batch that were cited in the answer. Read it against fetched age: when the cited pages are newer than the pool they came from, freshness helped them get picked, and keeping your page current matters for this prompt. When the two are alike, it did not. Empty while the answer is being written, when nothing from the batch was cited, or when the cited pages carry no date.', 'fetched age = 2mo, cited age = 12d means ChatGPT fetched pages two months old on average and cited pages from the last fortnight'],
+    ['fetched age', 'How old the pages that came back are. ChatGPT records a publication date for many of the pages it fetches, roughly half in practice. Take those dated pages, work out each one\'s age from its date to today and sort them: the column shows the middle one, the median. 2mo means half the dated pages are two months old or newer. It is the median rather than the average so one ten-year-old page cannot drag the number. Hover the cell for the newest, the oldest and how many are from the last 30 days. Inside the line each dated page shows its own age. The days column was what ChatGPT asked for, fetched age is what it got. Reads undated when none of the pages carry a date.', 'fetched age = 2mo. Hover: 26 of 58 pages carry a date, newest 6d, oldest 8.7y, 5 from the last 30 days'],
+    ['cited age', 'The same median, taken over the pages from this batch that were cited in the answer. Read it against fetched age: when the cited pages are newer than the pool they came from, freshness helped them get picked, and keeping your page current matters for this prompt. When the two are alike, it did not. Reads undated when the batch has cited pages but none of them carry a date, which is usual for product pages and help centres: The fetched pool had dates, the pages ChatGPT picked did not. Hover the cell for how many of the cited pages the number rests on. Empty while the answer is being written or when nothing from the batch was cited.', 'fetched age = 2mo, cited age = 12d means ChatGPT fetched pages two months old on average and cited pages from the last fortnight'],
     ['highlighted rows', 'Lines where the query or the domain mentions Reddit.', ''],
     ['reddit (exports only)', 'yes if the query or the domain mentions Reddit, otherwise no.', ''],
     ['location (exports only)', 'For business lines, the place ChatGPT searched around.', 'location = West Finchley, London, UK'],
@@ -715,8 +720,16 @@
         td.style.cssText = 'border-bottom:1px solid rgb(42,42,42);padding:4px 6px;vertical-align:top;' + (k === 'query' ? 'word-break:break-word' : 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis') + (k === 'cited' && r.cited !== '' && r.cited > 0 ? ';color:rgb(120,220,140);font-weight:600' : '');
         if (k === 'domain' && r.domain) td.title = r.domain;
         if (k === 'query') { td.title = r.qsrc === 'live' ? 'Captured live while ChatGPT answered, kept for this chat in this browser' : r.qsrc === 'saved' ? 'From the saved chat' : r.hidden ? 'ChatGPT did not send this query to the browser' : ''; if (r.hidden) td.style.cssText += ';color:rgb(140,140,140);font-style:italic'; }
-        if (k === 'age' && r.age !== '' && r.age != null) { const ag = r.sources.filter(e => e.date).map(e => ageOf(e.date)); td.title = ag.length + ' of ' + r.sources.length + ' pages that came back carry a date. Median ' + ageLabel(median(ag)) + ', newest ' + ageLabel(Math.min.apply(null, ag)) + ', oldest ' + ageLabel(Math.max.apply(null, ag)) + ', ' + ag.filter(a => a <= 30).length + ' from the last 30 days.'; }
-        if (k === 'citedAge') { const ca = r.sources.filter(e => e.cited && e.date).map(e => ageOf(e.date)), nc = r.sources.filter(e => e.cited).length; td.title = !r.known ? 'The answer is not finished yet' : !nc ? 'Nothing from this batch was cited' : ca.length ? ca.length + ' of the ' + nc + ' cited pages carry a date. Median ' + ageLabel(median(ca)) + ', newest ' + ageLabel(Math.min.apply(null, ca)) + ', oldest ' + ageLabel(Math.max.apply(null, ca)) + '.' : 'None of the ' + nc + ' cited pages carry a date'; }
+        if (k === 'age' && r.sources.length) {
+          const ag = r.sources.filter(e => e.date).map(e => ageOf(e.date));
+          if (ag.length) td.title = ag.length + ' of ' + r.sources.length + ' pages that came back carry a date. Median ' + ageLabel(median(ag)) + ', newest ' + ageLabel(Math.min.apply(null, ag)) + ', oldest ' + ageLabel(Math.max.apply(null, ag)) + ', ' + ag.filter(a => a <= 30).length + ' from the last 30 days.';
+          else { td.textContent = 'undated'; td.title = 'None of the ' + r.sources.length + ' pages that came back carry a publication date'; td.style.cssText += ';color:rgb(130,130,130);font-size:11px'; }
+        }
+        if (k === 'citedAge' && r.sources.length) {
+          const ca = r.sources.filter(e => e.cited && e.date).map(e => ageOf(e.date)), nc = r.sources.filter(e => e.cited).length;
+          td.title = !r.known ? 'The answer is not finished yet' : !nc ? 'Nothing from this batch was cited' : ca.length ? ca.length + ' of the ' + nc + ' cited pages carry a date. Median ' + ageLabel(median(ca)) + ', newest ' + ageLabel(Math.min.apply(null, ca)) + ', oldest ' + ageLabel(Math.max.apply(null, ca)) + '.' : 'None of the ' + nc + ' cited pages carry a publication date, which is usual for product and help centre pages';
+          if (r.known && nc && !ca.length) { td.textContent = 'undated'; td.style.cssText += ';color:rgb(130,130,130);font-size:11px'; }
+        }
         row.appendChild(td);
       });
       t.appendChild(row);
@@ -735,7 +748,7 @@
   const CACHE = 'fo-export:v1:';
   const saveCopy = () => {
     if (!meta.id || !rows.length) return;
-    const data = { at: meta.at, meta: { title: meta.title, prompts: meta.prompts, promptList: meta.promptList, fetched: meta.fetched, cited: meta.cited, redditFetched: meta.redditFetched, redditCited: meta.redditCited, unknownTurns: meta.unknownTurns },
+    const data = { at: meta.at, build: BUILD, meta: { title: meta.title, prompts: meta.prompts, promptList: meta.promptList, fetched: meta.fetched, cited: meta.cited, redditFetched: meta.redditFetched, redditCited: meta.redditCited, unknownTurns: meta.unknownTurns },
       rows: rows.map(r => ({ n: r.n, batch: r.batch, turn: r.turn, type: r.type, query: r.query, days: r.days, domain: r.domain, reddit: r.reddit, location: r.location, prompt: r.prompt, results: r.results, cited: r.cited, locked: r.locked, batchResults: r.batchResults, batchCited: r.batchCited, batchDomains: r.batchDomains, known: r.known, hidden: !!r.hidden, qsrc: r.qsrc || '', age: r.age, citedAge: r.citedAge, note: r.note || '', sources: r.sources.map(e => [e.raw, e.host, e.cited ? 1 : 0, e.date || 0, e.title || '', e.snippet || '']) })) };
     const write = () => localStorage.setItem(CACHE + meta.id, JSON.stringify(data));
     try { write(); } catch (e) { try { evict(10); write(); } catch (e2) {} }
@@ -752,7 +765,7 @@
       const d = JSON.parse(localStorage.getItem(CACHE + id) || 'null'); if (!d || !d.rows) return false;
       rows.length = 0;
       d.rows.forEach(r => { r.sources = (r.sources || []).map(x => ({ raw: x[0], url: normUrl(x[0]), host: x[1], cited: !!x[2], date: x[3] || 0, title: x[4] || '', snippet: x[5] || '' })); if (r.age == null) r.age = ''; if (r.citedAge == null) r.citedAge = ''; if (r.note == null) r.note = ''; rows.push(r); });
-      Object.assign(meta, d.meta); meta.id = id; meta.at = d.at;
+      Object.assign(meta, d.meta); meta.id = id; meta.at = d.at; copyStale = d.build !== BUILD;   // a copy from an older build is shown at once, then re-read once
       return true;
     } catch (e) { return false; }
   };
@@ -764,7 +777,7 @@
   // history and do not keep the reader polling: the rate limit is shared with ChatGPT's own page, so a reader that keeps
   // re-reading a long chat every few seconds makes ChatGPT itself answer 429 when you move between chats. 429 answers from ChatGPT trigger a growing pause between tries.
   let chatId = null, token = '', inFlight = false, lastSig = '', timer = null, live = true, closed = false;
-  let settled = false, wasStreaming = false, graceUntil = 0, backoffUntil = 0, backoffMs = 0, fromCopy = false;
+  let settled = false, wasStreaming = false, graceUntil = 0, backoffUntil = 0, backoffMs = 0, fromCopy = false, copyStale = false;
   const idFromUrl = () => { const m = location.pathname.match(/\/c\/([0-9a-fA-F-]{16,})/); return m ? m[1] : ''; };
   const streaming = () => !!document.querySelector('button[data-testid="stop-button"]');
   const getToken = async () => {
@@ -811,7 +824,7 @@
     if (id !== chatId) {
       chatId = id; lastSig = ''; settled = false; graceUntil = 0; fromCopy = false; rows.length = 0; expanded.clear(); body.innerHTML = ''; headline.textContent = ''; promptLine.textContent = '';
       if (!chatId) status.textContent = (window.__foTap ? 'Query capture is armed. ' : '') + 'Waiting for a chat. Send your prompt here and the searches, with their queries, will appear as ChatGPT runs them.';
-      else if (loadCopy(chatId)) { fromCopy = true; settled = !streaming(); render(); }
+      else if (loadCopy(chatId)) { fromCopy = true; settled = !copyStale && !streaming(); render(); }
       else status.textContent = 'Reading conversation ' + chatId + ' ...';
     }
     const now = Date.now(), busy = streaming();
