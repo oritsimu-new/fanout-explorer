@@ -15,7 +15,7 @@
   const HIDDEN_Q = 'query not exposed by ChatGPT';
   const HIDDEN_FIRST = 'query not captured: the bookmark was not running when this prompt was sent';
   const HIDDEN_LATER = 'follow-up batch: ChatGPT does not send these queries';
-  const BUILD = '2026-09-22.6';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-22.7';   // shown in the panel so a stale install can be spotted at a glance
   const NO_RESULTS = ['business', 'image'];   // their results are not exposed in the payload
 
   const rows = [];
@@ -387,8 +387,8 @@
     ['Show what ChatGPT read', 'A switch inside an opened line. On, each page shows the snippet ChatGPT was given for it, which is what it judged the page on before deciding whether to cite it, and the batch shows ChatGPT\'s own working note, the short thinking summary it wrote before running that batch, when the chat has one. Off by default so the list stays readable. Both are in the sources CSV as source_snippet and batch_note.', ''],
     ['Brands it searched (under the prompt)', 'The brands ChatGPT chose to check, read from the query text: a name in a query that matches one of the websites that came back, so words like SEO or AI never qualify and a brand it named but got no page from is not listed. The first batch of queries is written before a single result arrives, so these names come from what the model already holds: its training data, and your memory and custom instructions if they are on. A brand the model does not know cannot be in that first batch and can only enter through a generic query and whatever page answers it. Blocking the training crawlers on your own site makes that a little more likely, but most of what a model knows about a brand comes from other people\'s pages, so a well-discussed brand that blocks them is still named. Turn memory off when you measure, or your own history shapes the list.', 'Brands it searched: Semrush, Ahrefs, Sistrix, Sitebulb, Screaming Frog, seoClarity'],
     ['headline (above the table)', 'Fetched = pages that came back across the whole chat, each counted once. Shown as sources = how many of those appeared in an answer. Reddit = the same two numbers for reddit.com only.', 'Fetched 204 pages, 19 shown as sources. Reddit: 57 fetched, 5 cited.'],
-    ['fetched age', 'How old the pages that came back are. ChatGPT records a publication date for many of the pages it fetches, roughly half in practice. Take those dated pages, work out each one\'s age from its date to today and sort them: the column shows the middle one, the median. 2mo means half the dated pages are two months old or newer. It is the median rather than the average so one ten-year-old page cannot drag the number. Hover the cell for the newest, the oldest and how many are from the last 30 days. Inside the line each dated page shows its own age. The days column was what ChatGPT asked for, fetched age is what it got. Reads undated when none of the pages carry a date.', 'fetched age = 2mo. Hover: 26 of 58 pages carry a date, newest 6d, oldest 8.7y, 5 from the last 30 days'],
-    ['cited age', 'The same median, taken over the pages from this batch that were cited in the answer. Read it against fetched age: when the cited pages are newer than the pool they came from, freshness helped them get picked, and keeping your page current matters for this prompt. When the two are alike, it did not. Reads undated when the batch has cited pages but none of them carry a date, which is usual for product pages and help centres: The fetched pool had dates, the pages ChatGPT picked did not. Hover the cell for how many of the cited pages the number rests on. Empty while the answer is being written or when nothing from the batch was cited.', 'fetched age = 2mo, cited age = 12d means ChatGPT fetched pages two months old on average and cited pages from the last fortnight'],
+    ['fetched age', 'How old the pages that came back are. ChatGPT records a publication date for many of the pages it fetches, roughly half in practice. Take those dated pages, work out each one\'s age from its date to today and sort them: the column shows the middle one, the median. 2mo means half the dated pages are two months old or newer. It is the median rather than the average so one ten-year-old page cannot drag the number. The small number after it is how many pages carry a date out of how many came back, so you can see what the median rests on. Hover the cell for the newest, the oldest and how many are from the last 30 days. Inside the line each dated page shows its own age. The days column was what ChatGPT asked for, fetched age is what it got. Reads undated when none of the pages carry a date.', 'fetched age = 2mo 26/58 means 26 of the 58 pages carry a date and half of those are two months old or newer. Hover: newest 6d, oldest 8.7y, 5 from the last 30 days'],
+    ['cited age', 'The same median, taken over the pages from this batch that were cited in the answer. Read it against fetched age: when the cited pages are newer than the pool they came from, freshness helped them get picked, and keeping your page current matters for this prompt. When the two are alike, it did not. Reads undated when the batch has cited pages but none of them carry a date, which is usual for product pages and help centres: The fetched pool had dates, the pages ChatGPT picked did not. The small number after it is how many of the cited pages carry a date, so 4mo 1/4 rests on a single page and is a weak read. Empty while the answer is being written or when nothing from the batch was cited.', 'fetched age = 2mo 26/58, cited age = 12d 3/3 means the pool was two months old in the middle and all three cited pages were from the last fortnight'],
     ['highlighted rows', 'Lines where the query or the domain mentions Reddit.', ''],
     ['reddit (exports only)', 'yes if the query or the domain mentions Reddit, otherwise no.', ''],
     ['location (exports only)', 'For business lines, the place ChatGPT searched around.', 'location = West Finchley, London, UK'],
@@ -551,7 +551,7 @@
   // the freshness window it used to send: not what it asked for, but how old what came back actually was.
   const ageOf = ts => ts ? Math.max(0, Math.round((Date.now() / 1000 - ts) / 86400)) : null;
   const ageLabel = d => d == null ? '' : d < 1 ? 'today' : d < 30 ? d + 'd' : d < 365 ? Math.round(d / 30) + 'mo' : (Math.round(d / 36.5) / 10) + 'y';
-  const median = a => a.length ? a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)] : null;
+  const median = a => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y), h = s.length >> 1; return (s.length & 1) ? s[h] : Math.round((s[h - 1] + s[h]) / 2); };
   const dateStr = ts => { try { return new Date(ts * 1000).toISOString().slice(0, 10); } catch (e) { return ''; } };
   let showRead = false;   // one switch for every opened line: the snippet ChatGPT read for each page, and its own note for the batch
   const detailFor = (r) => {
@@ -564,7 +564,7 @@
     const citedAges = r.sources.filter(e => e.cited && e.date).map(e => ageOf(e.date));
     const sum = document.createElement('div'); sum.style.cssText = 'margin-bottom:6px;color:rgb(235,235,235)';
     sum.textContent = n + ' page' + (n === 1 ? '' : 's') + ' came back for ' + (inBatch > 1 ? 'the ' + inBatch + ' queries in this batch' : 'this batch') + (r.known ? ', ' + cited + ' cited' : '') + '.'
-      + (ages.length ? ' ' + ages.length + ' carry a publication date: the middle one is ' + ageLabel(median(ages)) + ' old, ' + ages.filter(a => a <= 30).length + ' from the last 30 days' + (r.known && citedAges.length ? ', the middle cited one ' + ageLabel(median(citedAges)) : '') + '.' : '');
+      + (ages.length ? ' ' + ages.length + ' carry a publication date: the middle one is ' + ageLabel(median(ages)) + ' old, ' + ages.filter(a => a <= 30).length + ' from the last 30 days' + (r.known && citedAges.length ? ', the middle cited one ' + ageLabel(median(citedAges)) + ' (' + citedAges.length + ' of the ' + cited + ' cited carry a date)' : r.known && cited ? ', none of the ' + cited + ' cited carry a date' : '') + '.' : '');
     // Cited pages first, as one list. Then the pages that were not cited, grouped by how their website did: every
     // website with the same counts shares one group, so the many websites that returned one page sit in one list.
     const pageLine = (e, indent) => {
@@ -694,7 +694,7 @@
     bE.textContent = expanded.size ? 'Collapse all' : 'Expand all';
     if (!rows.length) return;
     const t = document.createElement('table'); t.style.cssText = 'border-collapse:collapse;width:100' + String.fromCharCode(37) + ';table-layout:fixed';
-    const WIDTHS = { n: 40, batch: 52, type: 62, days: 52, age: 78, citedAge: 68, domain: 140, results: 62, cited: 52 };   // query takes the rest
+    const WIDTHS = { n: 40, batch: 52, type: 62, days: 52, age: 96, citedAge: 88, domain: 140, results: 62, cited: 52 };   // query takes the rest
     const cols = visibleCols();
     const tr = document.createElement('tr');
     const th0 = document.createElement('th'); th0.style.cssText = 'border-bottom:1px solid rgb(70,70,70);width:24px'; tr.appendChild(th0);
@@ -720,15 +720,18 @@
         td.style.cssText = 'border-bottom:1px solid rgb(42,42,42);padding:4px 6px;vertical-align:top;' + (k === 'query' ? 'word-break:break-word' : 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis') + (k === 'cited' && r.cited !== '' && r.cited > 0 ? ';color:rgb(120,220,140);font-weight:600' : '');
         if (k === 'domain' && r.domain) td.title = r.domain;
         if (k === 'query') { td.title = r.qsrc === 'live' ? 'Captured live while ChatGPT answered, kept for this chat in this browser' : r.qsrc === 'saved' ? 'From the saved chat' : r.hidden ? 'ChatGPT did not send this query to the browser' : ''; if (r.hidden) td.style.cssText += ';color:rgb(140,140,140);font-style:italic'; }
+        // age cells: the median, then in small grey how many pages carry a date out of how many the number is about
+        const withCount = (label, dated, of) => { td.textContent = ''; td.appendChild(document.createTextNode(label + ' ')); const c = document.createElement('span'); c.textContent = dated + '/' + of; c.style.cssText = 'color:rgb(130,130,130);font-size:11px'; td.appendChild(c); };
+        const undated = () => { td.textContent = 'undated'; td.style.cssText += ';color:rgb(130,130,130);font-size:11px'; };
         if (k === 'age' && r.sources.length) {
           const ag = r.sources.filter(e => e.date).map(e => ageOf(e.date));
-          if (ag.length) td.title = ag.length + ' of ' + r.sources.length + ' pages that came back carry a date. Median ' + ageLabel(median(ag)) + ', newest ' + ageLabel(Math.min.apply(null, ag)) + ', oldest ' + ageLabel(Math.max.apply(null, ag)) + ', ' + ag.filter(a => a <= 30).length + ' from the last 30 days.';
-          else { td.textContent = 'undated'; td.title = 'None of the ' + r.sources.length + ' pages that came back carry a publication date'; td.style.cssText += ';color:rgb(130,130,130);font-size:11px'; }
+          if (ag.length) { withCount(ageLabel(median(ag)), ag.length, r.sources.length); td.title = ag.length + ' of the ' + r.sources.length + ' pages that came back carry a date. Median ' + ageLabel(median(ag)) + ', newest ' + ageLabel(Math.min.apply(null, ag)) + ', oldest ' + ageLabel(Math.max.apply(null, ag)) + ', ' + ag.filter(a => a <= 30).length + ' from the last 30 days.'; }
+          else { undated(); td.title = 'None of the ' + r.sources.length + ' pages that came back carry a publication date'; }
         }
         if (k === 'citedAge' && r.sources.length) {
           const ca = r.sources.filter(e => e.cited && e.date).map(e => ageOf(e.date)), nc = r.sources.filter(e => e.cited).length;
           td.title = !r.known ? 'The answer is not finished yet' : !nc ? 'Nothing from this batch was cited' : ca.length ? ca.length + ' of the ' + nc + ' cited pages carry a date. Median ' + ageLabel(median(ca)) + ', newest ' + ageLabel(Math.min.apply(null, ca)) + ', oldest ' + ageLabel(Math.max.apply(null, ca)) + '.' : 'None of the ' + nc + ' cited pages carry a publication date, which is usual for product and help centre pages';
-          if (r.known && nc && !ca.length) { td.textContent = 'undated'; td.style.cssText += ';color:rgb(130,130,130);font-size:11px'; }
+          if (r.known && nc) { if (ca.length) withCount(ageLabel(median(ca)), ca.length, nc); else undated(); }
         }
         row.appendChild(td);
       });
