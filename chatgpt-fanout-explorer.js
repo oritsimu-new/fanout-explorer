@@ -15,7 +15,7 @@
   const HIDDEN_Q = 'query not exposed by ChatGPT';
   const HIDDEN_FIRST = 'query not captured: the bookmark was not running when this prompt was sent';
   const HIDDEN_LATER = 'follow-up batch: ChatGPT does not send these queries';
-  const BUILD = '2026-09-21.3';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-22';   // shown in the panel so a stale install can be spotted at a glance
   const NO_RESULTS = ['business', 'image'];   // their results are not exposed in the payload
 
   const rows = [];
@@ -360,9 +360,9 @@
     ['domain', 'When filled, ChatGPT only searched that one website. Empty = the whole web. A site: inside the query does the same job.' + ' Gone from new chats since September 2026, along with the query text, so this column is empty on them.', 'domain = reddit.com means only Reddit was searched. site:linkedin.com/jobs in the query means only LinkedIn jobs pages.'],
     ['results', 'How many pages came back. For a line with a domain or a site:, it is the count from that website in that round. For an open search, it is the count for the whole round. ChatGPT records results per round, not per query, so lines in the same round that search the same place show the same number. Empty for business and image lines, whose results are not exposed.', 'results = 12 with domain = sexyfish.com means 12 pages from sexyfish.com came back. results = 0 with domain = reddit.com means the Reddit search returned nothing, so Reddit could not be cited from it.'],
     ['cited', 'How many of those pages were shown as a source in the answer, either as a citation chip in the text or in the Sources list at the end. Empty while the answer is still being written, or when the answer for that prompt is not stored in the chat.', 'results = 11, cited = 3 means 11 pages came back and 3 were shown as sources. results = 84, cited = 0 means ChatGPT read 84 pages and credited none of them.'],
-    ['+ (first column)', 'Opens the line to show the pages that came back, grouped by how each website did: every website with the same page count and cited count shares one group, cited groups first, so the websites that returned a single page and got nothing cited sit in one list. A tick marks a page shown as a source in the answer, a dot the rest, and the age next to each page is its publication date read against today. Hover a page for its title and date. ChatGPT returns one pool of pages for the whole batch, so every query in a batch opens the same list.', ''],
+    ['+ (first column)', 'Opens the line. First every page that was shown as a source in the answer, then the pages that were not, grouped by website: a website with several pages gets its own group with its full record in brackets, and the websites that returned a single page sit in one list. The age next to a page is its publication date read against today. Hover a page for its title and date. ChatGPT returns one pool of pages for the whole batch, so every query in a batch opens the same list.', ''],
     ['headline (above the table)', 'Fetched = pages that came back across the whole chat, each counted once. Shown as sources = how many of those appeared in an answer. Reddit = the same two numbers for reddit.com only.', 'Fetched 204 pages, 19 shown as sources. Reddit: 57 fetched, 5 cited.'],
-    ['page age', 'The median age of the dated pages that came back for the batch. ChatGPT records a publication date for many of the pages it fetches, and this column reads them: 2mo means half the dated pages are two months old or newer. Hover the cell for the newest, the oldest, how many are from the last 30 days and the median age of the cited pages. Inside the line each dated page shows its own age. The freshness window in the days column was what ChatGPT asked for; page age is what it actually got. Empty when none of the pages carry a date.', 'page age = 2mo. Hover: 26 of 58 pages carry a date, newest 6d, oldest 8.7y, 5 from the last 30 days, cited pages median 41d'],
+    ['page age', 'How old the pages that came back are. ChatGPT records a publication date for many of the pages it fetches, roughly half in practice. Take those dated pages, work out each one\'s age from its date to today and sort them: the column shows the middle one, the median. 2mo means half the dated pages are two months old or newer. It is the median rather than the average so one ten-year-old page cannot drag the number. Hover the cell for the newest, the oldest, how many are from the last 30 days and the median of the cited pages. Inside the line each dated page shows its own age. The days column was what ChatGPT asked for, page age is what it got. Empty when none of the pages carry a date.', 'page age = 2mo. Hover: 26 of 58 pages carry a date, newest 6d, oldest 8.7y, 5 from the last 30 days, cited pages median 41d'],
     ['highlighted rows', 'Lines where the query or the domain mentions Reddit.', ''],
     ['reddit (exports only)', 'yes if the query or the domain mentions Reddit, otherwise no.', ''],
     ['location (exports only)', 'For business lines, the place ChatGPT searched around.', 'location = West Finchley, London, UK'],
@@ -536,14 +536,9 @@
     const citedAges = r.sources.filter(e => e.cited && e.date).map(e => ageOf(e.date));
     const sum = document.createElement('div'); sum.style.cssText = 'margin-bottom:6px;color:rgb(235,235,235)';
     sum.textContent = n + ' page' + (n === 1 ? '' : 's') + ' came back for ' + (inBatch > 1 ? 'the ' + inBatch + ' queries in this batch' : 'this batch') + (r.known ? ', ' + cited + ' cited' : '') + '.'
-      + (ages.length ? ' ' + ages.length + ' carry a date: median age ' + ageLabel(median(ages)) + ', ' + ages.filter(a => a <= 30).length + ' from the last 30 days' + (r.known && citedAges.length ? ', cited pages median ' + ageLabel(median(citedAges)) : '') + '.' : '');
-    // Pages grouped by how their website did: every website with the same page count and cited count shares one tier,
-    // so the thirty websites that returned one page and got nothing cited sit in one list rather than thirty headers.
-    const byHost = {};
-    r.sources.forEach(e => { const h = byHost[e.host] || (byHost[e.host] = { host: e.host, n: 0, c: 0, list: [] }); h.n++; if (e.cited) h.c++; h.list.push(e); });
-    const tiers = {};
-    Object.values(byHost).forEach(h => { const k = h.n + '|' + (r.known ? h.c : 0); (tiers[k] || (tiers[k] = { n: h.n, c: r.known ? h.c : 0, hosts: [] })).hosts.push(h); });
-    const order = Object.values(tiers).sort((a, b) => (b.c - a.c) || (b.n - a.n));
+      + (ages.length ? ' ' + ages.length + ' carry a publication date: the middle one is ' + ageLabel(median(ages)) + ' old, ' + ages.filter(a => a <= 30).length + ' from the last 30 days' + (r.known && citedAges.length ? ', the middle cited one ' + ageLabel(median(citedAges)) : '') + '.' : '');
+    // Cited pages first, as one list. Then the pages that were not cited, grouped by how their website did: every
+    // website with the same counts shares one group, so the many websites that returned one page sit in one list.
     const pageLine = (e, indent) => {
       const d = document.createElement('div'); d.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:' + indent + 'px';
       const mark = document.createElement('span'); mark.textContent = e.cited ? '✓ ' : '· '; mark.style.cssText = e.cited ? 'color:rgb(120,220,140);font-weight:700' : 'color:rgb(120,120,120)';
@@ -555,26 +550,44 @@
       d.append(mark, age, a);
       return d;
     };
-    const sortedPages = list => list.slice().sort((a, b) => (b.cited - a.cited) || a.url.localeCompare(b.url));
-    const list = document.createElement('div'); if (n > 6) list.style.cssText = 'column-count:2;column-gap:28px';
+    const section = (text) => { const h = document.createElement('div'); h.textContent = text; h.style.cssText = 'color:rgb(235,235,235);font-weight:700;margin:6px 0 3px'; return h; };
+    const byUrl = (a, b) => a.host.localeCompare(b.host) || a.url.localeCompare(b.url);
+    const list = document.createElement('div');
+    const citedPages = r.known ? r.sources.filter(e => e.cited).sort(byUrl) : [];
+    const rest = r.known ? r.sources.filter(e => !e.cited) : r.sources.slice();
+    if (r.known) {
+      list.appendChild(section('Cited (' + citedPages.length + ')'));
+      if (citedPages.length) { const cl = document.createElement('div'); if (citedPages.length > 6) cl.style.cssText = 'column-count:2;column-gap:28px'; citedPages.forEach(e => cl.appendChild(pageLine(e, 4))); list.appendChild(cl); }
+      else { const none = document.createElement('div'); none.textContent = 'None of the pages from this batch were shown as a source.'; none.style.cssText = 'color:rgb(170,170,170);padding-left:4px'; list.appendChild(none); }
+      list.appendChild(section(r.known ? 'Not cited (' + rest.length + '), by website' : 'By website'));
+    }
+    const byHost = {};
+    r.sources.forEach(e => { const h = byHost[e.host] || (byHost[e.host] = { host: e.host, n: 0, c: 0, list: [] }); h.n++; if (e.cited) h.c++; });
+    rest.forEach(e => byHost[e.host].list.push(e));
+    const tiers = {};
+    Object.values(byHost).forEach(h => { if (!h.list.length) return; const k = h.list.length + '|' + h.n + '|' + (r.known ? h.c : 0); (tiers[k] || (tiers[k] = { shown: h.list.length, n: h.n, c: r.known ? h.c : 0, hosts: [] })).hosts.push(h); });
+    const order = Object.values(tiers).sort((a, b) => (b.c - a.c) || (b.n - a.n));
+    const groups = document.createElement('div'); if (rest.length > 6) groups.style.cssText = 'column-count:2;column-gap:28px';
     order.forEach(t => {
       const block = document.createElement('div'); block.style.cssText = 'break-inside:avoid;margin:0 0 8px';
       const head = document.createElement('div'); head.style.cssText = 'color:rgb(235,235,235);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
       const hosts = t.hosts.sort((a, b) => a.host.localeCompare(b.host));
-      head.textContent = t.n + ' page' + (t.n === 1 ? '' : 's') + (r.known ? ', ' + t.c + ' cited' : '') + (hosts.length === 1 ? ': ' + hosts[0].host : ': ' + hosts.length + ' websites');
+      const pages = t.shown + ' page' + (t.shown === 1 ? '' : 's');
+      const record = r.known && t.c ? ' (' + t.n + ' fetched, ' + t.c + ' cited)' : '';
+      head.textContent = hosts.length === 1 ? pages + ': ' + hosts[0].host + record : pages + (t.shown === 1 ? '' : ' each') + ': ' + hosts.length + ' websites' + record;
       block.appendChild(head);
-      if (hosts.length === 1 || t.n === 1) {
-        // one website, or one page per website: the page lines carry the website themselves
-        hosts.forEach(h => sortedPages(h.list).forEach(e => block.appendChild(pageLine(e, 4))));
+      if (hosts.length === 1 || t.shown === 1) {
+        hosts.forEach(h => h.list.slice().sort(byUrl).forEach(e => block.appendChild(pageLine(e, 4))));
       } else {
         hosts.forEach(h => {
           const hl = document.createElement('div'); hl.textContent = h.host; hl.style.cssText = 'color:rgb(200,200,200);padding:2px 0 0 4px';
           block.appendChild(hl);
-          sortedPages(h.list).forEach(e => block.appendChild(pageLine(e, 12)));
+          h.list.slice().sort(byUrl).forEach(e => block.appendChild(pageLine(e, 12)));
         });
       }
-      list.appendChild(block);
+      groups.appendChild(block);
     });
+    list.appendChild(groups);
     wrap.append(sum, list);
     return wrap;
   };
