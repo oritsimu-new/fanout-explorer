@@ -15,7 +15,7 @@
   const HIDDEN_Q = 'query not exposed by ChatGPT';
   const HIDDEN_FIRST = 'query not captured: the bookmark was not running when this prompt was sent';
   const HIDDEN_LATER = 'follow-up batch: ChatGPT does not send these queries';
-  const BUILD = '2026-09-22.3';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-22.4';   // shown in the panel so a stale install can be spotted at a glance
   const NO_RESULTS = ['business', 'image'];   // their results are not exposed in the payload
 
   const rows = [];
@@ -656,7 +656,8 @@
     if (!labels.size) return '';
     const found = [];
     const seen = new Set();
-    const matches = key => { if (key.length < 3) return false; for (const l of labels) { if (l === key) return true; if (key.length >= 4 && (l.startsWith(key) || l.endsWith(key)) && l.length - key.length <= 4) return true; } return false; };
+    // Exact match on the website name, or a name of six letters or more with a short prefix on the site (Profound and tryprofound).
+    const matches = key => { if (key.length < 3) return false; for (const l of labels) { if (l === key) return true; if (key.length >= 6 && (l.startsWith(key) || l.endsWith(key)) && l.length - key.length <= 3) return true; } return false; };
     qs.forEach(q => {
       const words = q.replace(/["“”]/g, ' ').split(/\s+/).filter(Boolean);
       for (let i = 0; i < words.length; i++) {
