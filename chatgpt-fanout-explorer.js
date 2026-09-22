@@ -15,7 +15,7 @@
   const HIDDEN_Q = 'query not exposed by ChatGPT';
   const HIDDEN_FIRST = 'query not captured: the bookmark was not running when this prompt was sent';
   const HIDDEN_LATER = 'follow-up batch: ChatGPT does not send these queries';
-  const BUILD = '2026-09-22.7';   // shown in the panel so a stale install can be spotted at a glance
+  const BUILD = '2026-09-22.8';   // shown in the panel so a stale install can be spotted at a glance
   const NO_RESULTS = ['business', 'image'];   // their results are not exposed in the payload
 
   const rows = [];
@@ -722,7 +722,7 @@
         if (k === 'query') { td.title = r.qsrc === 'live' ? 'Captured live while ChatGPT answered, kept for this chat in this browser' : r.qsrc === 'saved' ? 'From the saved chat' : r.hidden ? 'ChatGPT did not send this query to the browser' : ''; if (r.hidden) td.style.cssText += ';color:rgb(140,140,140);font-style:italic'; }
         // age cells: the median, then in small grey how many pages carry a date out of how many the number is about
         const withCount = (label, dated, of) => { td.textContent = ''; td.appendChild(document.createTextNode(label + ' ')); const c = document.createElement('span'); c.textContent = dated + '/' + of; c.style.cssText = 'color:rgb(130,130,130);font-size:11px'; td.appendChild(c); };
-        const undated = () => { td.textContent = 'undated'; td.style.cssText += ';color:rgb(130,130,130);font-size:11px'; };
+        const undated = () => { td.textContent = 'undated'; td.style.cssText += ';color:rgb(130,130,130);font-style:italic'; };
         if (k === 'age' && r.sources.length) {
           const ag = r.sources.filter(e => e.date).map(e => ageOf(e.date));
           if (ag.length) { withCount(ageLabel(median(ag)), ag.length, r.sources.length); td.title = ag.length + ' of the ' + r.sources.length + ' pages that came back carry a date. Median ' + ageLabel(median(ag)) + ', newest ' + ageLabel(Math.min.apply(null, ag)) + ', oldest ' + ageLabel(Math.max.apply(null, ag)) + ', ' + ag.filter(a => a <= 30).length + ' from the last 30 days.'; }
